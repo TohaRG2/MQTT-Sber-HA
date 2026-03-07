@@ -1,0 +1,514 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sber MQTT Bridge</title>
+<style>
+:root{--bg:#f0f2f5;--card:#fff;--border:#e1e4e8;--primary:#21a038;--primary-dk:#157a2a;--primary-lt:#e8f5e9;--danger:#d32f2f;--text:#1a1a2e;--muted:#6b7280;--radius:10px;--shadow:0 2px 8px rgba(0,0,0,.08)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.hdr{background:var(--card);border-bottom:1px solid var(--border);height:56px;display:flex;align-items:center;justify-content:space-between;padding:0 20px;position:sticky;top:0;z-index:100;box-shadow:var(--shadow)}
+.hdr-l{display:flex;align-items:center;gap:10px}
+.logo{width:30px;height:30px;background:var(--primary);border-radius:7px;display:flex;align-items:center;justify-content:center}
+.logo svg{width:18px;height:18px;fill:#fff}
+.hdr h1{font-size:16px;font-weight:600}
+.conn-badge{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--bg);padding:4px 10px;border-radius:20px;border:1px solid var(--border)}
+.dot{width:7px;height:7px;border-radius:50%;background:#9e9e9e;transition:background .3s}
+.dot.ok{background:var(--primary)}.dot.err{background:var(--danger)}
+.main{max-width:1120px;margin:0 auto;padding:20px 16px}
+.toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:10px;flex-wrap:wrap}
+.toolbar-l{font-size:14px;color:var(--muted)}
+.btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s;line-height:1.4}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-dk)}
+.btn-ghost{background:var(--card);color:var(--text);border:1px solid var(--border)}.btn-ghost:hover{background:var(--bg)}
+.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#b71c1c}
+.btn-sm{padding:4px 10px;font-size:12px}.btn:disabled{opacity:.5;cursor:not-allowed}
+.tbl-wrap{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
+table{width:100%;border-collapse:collapse}
+th{background:var(--bg);padding:9px 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;user-select:none;text-align:left}
+th:hover{color:var(--primary)}th.sorted{color:var(--primary)}
+td{padding:10px 14px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:top}
+tr:last-child td{border-bottom:none}tr:hover td{background:#fafafa}
+.id-cell{font-family:monospace;font-size:11px;color:var(--muted)}
+.type-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary-lt);color:var(--primary-dk);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
+.attrs{font-size:11px;color:var(--muted);line-height:1.7}
+.state-cell{font-size:10px;font-family:monospace;background:#f6f8fa;border:1px solid var(--border);border-radius:4px;padding:3px 6px;max-width:180px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;display:block}
+.state-cell:hover{white-space:normal;word-break:break-all;max-width:none}
+.empty{text-align:center;padding:56px 20px;color:var(--muted)}
+.empty .ei{font-size:44px;margin-bottom:14px}.empty h3{font-size:17px;margin-bottom:6px;color:var(--text)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:12px}
+.modal{background:var(--card);border-radius:14px;width:100%;max-width:660px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.m-hdr{padding:18px 20px 0;display:flex;align-items:center;justify-content:space-between}
+.m-hdr h2{font-size:17px;font-weight:600}
+.m-close{background:none;border:none;cursor:pointer;font-size:20px;color:var(--muted);padding:4px;border-radius:6px;line-height:1}.m-close:hover{background:var(--bg)}
+.m-body{padding:18px 20px;overflow-y:auto;flex:1}.m-foot{padding:14px 20px 18px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px}
+.steps{display:flex;margin-bottom:22px}
+.step{flex:1;text-align:center;position:relative}
+.step::after{content:'';position:absolute;top:13px;left:50%;right:-50%;height:2px;background:var(--border);z-index:0}
+.step:last-child::after{display:none}
+.step-c{width:26px;height:26px;border-radius:50%;border:2px solid var(--border);background:var(--card);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:var(--muted);position:relative;z-index:1;margin-bottom:4px;transition:all .2s}
+.step.active .step-c{border-color:var(--primary);background:var(--primary);color:#fff}
+.step.done .step-c{border-color:var(--primary);background:var(--primary-lt);color:var(--primary)}
+.step.done::after{background:var(--primary)}.step-lbl{font-size:10px;color:var(--muted)}
+.step.active .step-lbl{color:var(--primary);font-weight:500}
+.fg{margin-bottom:16px}.fg label{display:block;font-size:12px;font-weight:600;margin-bottom:5px;color:var(--text)}.fg .hint{font-size:11px;color:var(--muted);margin-top:3px}
+input[type=text],select{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;font-size:13px;color:var(--text);background:var(--card);outline:none;transition:border-color .15s}
+input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(33,160,56,.12)}
+.type-card{border:2px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px;cursor:pointer;display:flex;gap:12px;align-items:flex-start;transition:all .15s}
+.type-card:hover,.type-card.sel{border-color:var(--primary);background:var(--primary-lt)}
+.type-icon{font-size:26px;line-height:1;flex-shrink:0}.type-name{font-weight:600;font-size:14px;margin-bottom:3px}.type-desc{font-size:12px;color:var(--muted)}
+.picker{border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.psearch{display:flex;align-items:center;gap:7px;padding:7px 11px;border-bottom:1px solid var(--border);background:var(--bg)}
+.psearch input{border:none;background:none;flex:1;padding:3px 0;font-size:13px;outline:none}
+.psearch .clr{background:none;border:none;cursor:pointer;color:var(--muted);font-size:15px;padding:2px 3px}
+.p-head{display:grid;grid-template-columns:90px 110px 1fr 150px;gap:6px;padding:5px 11px;background:var(--bg);font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted)}
+.p-list{max-height:260px;overflow-y:auto}
+.p-item{display:grid;grid-template-columns:90px 110px 1fr 150px;gap:6px;padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border);align-items:center;transition:background .1s}
+.p-item:last-child{border-bottom:none}.p-item:hover,.p-item.sel{background:var(--primary-lt)}
+.dom-badge{background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:500;text-align:center;white-space:nowrap}
+.p-area{font-size:11px;color:var(--muted)}.p-name{font-size:12px;font-weight:500}
+.p-eid{font-size:10px;font-family:monospace;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.p-empty{padding:20px;text-align:center;color:var(--muted);font-size:13px}
+.sg{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.sf label{font-size:12px;font-weight:600;margin-bottom:5px;display:block}
+.sf-btn{width:100%;padding:8px 11px;border:1px solid var(--border);border-radius:7px;background:var(--card);text-align:left;cursor:pointer;font-size:12px;color:var(--muted);display:flex;justify-content:space-between;align-items:center;transition:border-color .15s}
+.sf-btn.filled{color:var(--text);border-color:var(--primary);background:var(--primary-lt)}.sf-btn:hover{border-color:var(--primary)}
+.sf-clr{border:none;background:none;cursor:pointer;color:var(--danger);font-size:11px;margin-left:6px}.sf-sub{font-size:10px;color:var(--muted);margin-top:3px}
+.sp-wrap{margin-top:14px}
+.conf-box{background:#fff;border-radius:12px;padding:22px;max-width:360px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.conf-box h3{margin-bottom:8px;font-size:16px}.conf-box p{font-size:13px;color:var(--muted);margin-bottom:18px}
+.conf-box .ca{display:flex;justify-content:flex-end;gap:8px}
+.toast{position:fixed;bottom:20px;right:20px;background:#323232;color:#fff;padding:10px 18px;border-radius:8px;font-size:13px;z-index:999;transform:translateY(70px);opacity:0;transition:all .28s;pointer-events:none;max-width:320px}
+.toast.show{transform:translateY(0);opacity:1}.toast.ok{background:var(--primary)}.toast.err{background:var(--danger)}
+.spin{width:16px;height:16px;border:2px solid #fff4;border-top-color:#fff;border-radius:50%;animation:sp .6s linear infinite;display:inline-block}
+@keyframes sp{to{transform:rotate(360deg)}}
+.loading{display:flex;align-items:center;justify-content:center;padding:40px}
+
+/* Token form */
+.token-screen{display:flex;align-items:center;justify-content:center;min-height:80vh}
+.token-box{background:var(--card);border-radius:14px;padding:32px;max-width:480px;width:100%;box-shadow:var(--shadow);border:1px solid var(--border)}
+.token-box h2{margin-bottom:8px;font-size:18px}.token-box p{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6}
+.token-box ol{font-size:13px;color:var(--muted);padding-left:20px;margin-bottom:20px;line-height:2}
+.token-box ol b{color:var(--text)}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <div class="hdr-l">
+    <div class="logo"><svg viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></svg></div>
+    <h1>Sber MQTT Bridge</h1>
+  </div>
+  <div class="conn-badge">
+    <div class="dot" id="dot"></div>
+    <span id="connText">…</span>
+  </div>
+</div>
+
+<div class="main" id="mainContent" style="display:none">
+  <div class="toolbar">
+    <div class="toolbar-l" id="cntLabel">Загрузка…</div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="doPublishConfig()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        Обновить в Сбере
+      </button>
+      <button class="btn btn-primary" onclick="openWizard()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
+        Добавить устройство
+      </button>
+    </div>
+  </div>
+  <div class="tbl-wrap">
+    <table>
+      <thead><tr>
+        <th onclick="sortBy('name')">Имя <span id="si-name"></span></th>
+        <th onclick="sortBy('id')">ID <span id="si-id"></span></th>
+        <th onclick="sortBy('room')">Комната <span id="si-room"></span></th>
+        <th onclick="sortBy('device_type')">Тип <span id="si-device_type"></span></th>
+        <th>Атрибуты</th>
+        <th>Последнее состояние</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="tbody">
+        <tr><td colspan="7"><div class="loading"><div class="spin" style="border-color:#ddd3;border-top-color:var(--primary)"></div></div></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- Token input screen (shown when no token found) -->
+<div class="main token-screen" id="tokenScreen" style="display:none">
+  <div class="token-box">
+    <h2>🔑 Требуется авторизация</h2>
+    <p>Для работы панели необходим Long-Lived Access Token из Home Assistant.</p>
+    <ol>
+      <li>Нажмите на <b>ваш профиль</b> в левом нижнем углу HA</li>
+      <li>Прокрутите вниз до раздела <b>«Долгосрочные токены доступа»</b></li>
+      <li>Нажмите <b>«Создать токен»</b>, введите любое имя</li>
+      <li>Скопируйте токен и вставьте ниже</li>
+    </ol>
+    <div class="fg">
+      <label>Long-Lived Access Token</label>
+      <input type="text" id="tokenInput" placeholder="eyJhbGciOiJIUzI1NiIs..." />
+    </div>
+    <button class="btn btn-primary" style="width:100%" onclick="saveToken()">Сохранить и войти</button>
+  </div>
+</div>
+
+<!-- ADD WIZARD -->
+<div id="wiz" class="overlay" style="display:none">
+  <div class="modal">
+    <div class="m-hdr">
+      <h2 id="wizTitle">Добавить устройство</h2>
+      <button class="m-close" onclick="closeWizard()">✕</button>
+    </div>
+    <div class="m-body">
+      <div class="steps" id="wizSteps"></div>
+      <div id="wizContent"></div>
+    </div>
+    <div class="m-foot">
+      <button class="btn btn-ghost" id="btnBack" onclick="wizBack()" style="display:none">← Назад</button>
+      <button class="btn btn-primary" id="btnNext" onclick="wizNext()">Далее →</button>
+    </div>
+  </div>
+</div>
+
+<!-- CONFIRM DELETE -->
+<div id="conf" class="overlay" style="display:none">
+  <div class="conf-box">
+    <h3>Удалить устройство?</h3>
+    <p id="confTxt"></p>
+    <div class="ca">
+      <button class="btn btn-ghost" onclick="closeConf()">Отмена</button>
+      <button class="btn btn-danger" onclick="doDelete()">Удалить</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ================================================================
+// TOKEN MANAGEMENT
+// Token is stored in localStorage of this page.
+// On first visit user pastes a Long-Lived Access Token.
+// ================================================================
+const TOKEN_KEY = 'sber_mqtt_ha_token';
+
+function getToken() {
+  return localStorage.getItem(TOKEN_KEY) || null;
+}
+function saveToken() {
+  const val = document.getElementById('tokenInput').value.trim();
+  if (!val) { toast('Введите токен','err'); return; }
+  localStorage.setItem(TOKEN_KEY, val);
+  showMain();
+  init();
+}
+function clearToken() {
+  localStorage.removeItem(TOKEN_KEY);
+  showTokenScreen();
+}
+function showMain() {
+  document.getElementById('mainContent').style.display = '';
+  document.getElementById('tokenScreen').style.display = 'none';
+}
+function showTokenScreen() {
+  document.getElementById('mainContent').style.display = 'none';
+  document.getElementById('tokenScreen').style.display = '';
+}
+
+// ── API ──────────────────────────────────────────────────────────
+async function api(url, opts={}) {
+  const token = getToken();
+  const headers = { 'Content-Type': 'application/json' };
+  if (token) headers['Authorization'] = 'Bearer ' + token;
+  const r = await fetch(url, { headers, ...opts });
+  if (r.status === 401) {
+    // Token is invalid — ask user to re-enter
+    clearToken();
+    throw new Error('Токен недействителен. Введите новый токен.');
+  }
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `HTTP ${r.status}`);
+  }
+  return r.json();
+}
+
+// ================================================================
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности' };
+const STEPS = {
+  relay:      ['Тип устройства','Источник в HA','Параметры'],
+  sensor_temp:['Тип устройства','Датчики в HA','Параметры'],
+};
+
+let devices=[], sortField='name', sortAsc=true, delId=null;
+let wStep=1, wType=null, wData={}, haRelay=[], haSensors=[], sFilter='', spField=null;
+
+async function loadStatus() {
+  try {
+    const d = await api('/api/sber_mqtt/status');
+    document.getElementById('dot').className='dot '+(d.connected?'ok':'err');
+    document.getElementById('connText').textContent=d.connected?`${d.login} · ${d.broker}`:'Нет подключения';
+  } catch(e) {
+    document.getElementById('connText').textContent='Ошибка';
+  }
+}
+
+async function loadDevices() {
+  try {
+    const d = await api('/api/sber_mqtt/devices');
+    devices=d.devices||[];
+    renderTable();
+    document.getElementById('cntLabel').textContent=`Устройств: ${devices.length}`;
+  } catch(e) {
+    document.getElementById('tbody').innerHTML=
+      `<tr><td colspan="7" style="color:var(--danger);text-align:center;padding:20px">Ошибка: ${esc(e.message)}</td></tr>`;
+  }
+}
+
+function fmtState(s) {
+  if (!s || !Object.keys(s).length) return '—';
+  // Красиво форматируем states: [{"key":"on_off","value":{"bool_value":true}}]
+  // → on_off: true, online: true
+  if (Array.isArray(s.states)) {
+    return s.states.map(item => {
+      const v = item.value || {};
+      const val = v.bool_value !== undefined ? v.bool_value
+                : v.integer_value !== undefined ? v.integer_value
+                : v.enum_value !== undefined ? v.enum_value
+                : JSON.stringify(v);
+      return `${item.key}: ${val}`;
+    }).join(' | ');
+  }
+  return JSON.stringify(s);
+}
+
+function renderTable() {
+  const rows=[...devices].sort((a,b)=>{
+    const va=(a[sortField]||'').toString().toLowerCase();
+    const vb=(b[sortField]||'').toString().toLowerCase();
+    return sortAsc?va.localeCompare(vb,'ru'):vb.localeCompare(va,'ru');
+  });
+  ['name','id','room','device_type'].forEach(f=>{
+    const el=document.getElementById(`si-${f}`);
+    if(el){el.textContent=sortField===f?(sortAsc?'▲':'▼'):'';el.closest('th').classList.toggle('sorted',sortField===f);}
+  });
+  const tb=document.getElementById('tbody');
+  if(!rows.length){
+    tb.innerHTML=`<tr><td colspan="7"><div class="empty"><div class="ei">🏠</div><h3>Нет устройств</h3><p>Нажмите «Добавить устройство»</p></div></td></tr>`;
+    return;
+  }
+  tb.innerHTML=rows.map(d=>{
+    const attrs=Object.entries(d.attributes||{}).map(([k,v])=>`<div><b>${esc(k)}:</b> ${esc(v||'—')}</div>`).join('');
+    return `<tr>
+      <td><b>${esc(d.name)}</b></td>
+      <td class="id-cell">${esc(d.id)}</td>
+      <td>${esc(d.room||'—')}</td>
+      <td><span class="type-badge">${esc(TYPE_LABELS[d.device_type]||d.device_type)}</span></td>
+      <td class="attrs">${attrs||'—'}</td>
+      <td><span class="state-cell" title="${fmtState(d.last_state)}">${esc(fmtState(d.last_state))}</span></td>
+      <td><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function sortBy(f){if(sortField===f)sortAsc=!sortAsc;else{sortField=f;sortAsc=true;}renderTable();}
+
+async function doPublishConfig(){
+  try{const r=await api('/api/sber_mqtt/publish_config',{method:'POST'});toast(`Конфигурация (${r.devices_count} устройств) отправлена`,'ok');}
+  catch(e){toast('Ошибка: '+e.message,'err');}
+}
+
+function askDel(id,name){delId=id;document.getElementById('confTxt').textContent=`Устройство «${name}» будет удалено.`;document.getElementById('conf').style.display='flex';}
+function closeConf(){delId=null;document.getElementById('conf').style.display='none';}
+async function doDelete(){
+  if(!delId)return;const id=delId;closeConf();
+  try{await api(`/api/sber_mqtt/devices/${id}`,{method:'DELETE'});toast('Удалено','ok');await loadDevices();}
+  catch(e){toast('Ошибка: '+e.message,'err');}
+}
+
+function openWizard(){
+  wStep=1;wType=null;wData={};sFilter='';spField=null;
+  // Сбрасываем кэш сущностей чтобы подтянуть актуальный список из HA
+  haRelay=[];haSensors=[];
+  document.getElementById('wiz').style.display='flex';
+  renderWiz();
+}
+function closeWizard(){document.getElementById('wiz').style.display='none';}
+
+async function wizNext(){
+  if(!await wizValidate())return;
+  const total=(STEPS[wType]||['','','']).length;
+  if(wStep<total){
+    wStep++;
+    // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();}
+    renderWiz();
+  }else{
+    await submitDevice();
+  }
+}
+function wizBack(){if(wStep>1){wStep--;renderWiz();}}
+
+async function wizValidate(){
+  const total=(STEPS[wType]||['','','']).length;
+  const isLast=wStep===total;
+
+  if(wStep===1){
+    // Шаг 1: выбор типа
+    if(!wType){toast('Выберите тип','err');return false;}
+  } else if(wStep===2&&!isLast){
+    // Шаг 2 — выбор сущности (только если не последний шаг)
+    if(wType==='relay'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
+    if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
+  }
+
+  if(isLast){
+    // Последний шаг — параметры устройства
+    const name=document.getElementById('dName')?.value?.trim();
+    const id=document.getElementById('dId')?.value?.trim();
+    if(!name){toast('Введите имя','err');return false;}
+    if(!id){toast('Введите ID','err');return false;}
+    if(!/^[a-z0-9_]+$/.test(id)){toast('ID: только a-z, 0-9 и _','err');return false;}
+    if(devices.find(d=>d.id===id)){toast(`ID «${id}» уже занят`,'err');return false;}
+    wData.name=name;wData.id=id;wData.room=document.getElementById('dRoom')?.value?.trim()||'';
+  }
+  return true;
+}
+
+function renderWiz(){
+  const steps=STEPS[wType]||['Тип','Выбор','Параметры'];
+  document.getElementById('wizTitle').textContent=steps[wStep-1];
+  document.getElementById('btnBack').style.display=wStep>1?'':'none';
+  document.getElementById('btnNext').textContent=wStep===steps.length?'Готово ✓':'Далее →';
+  document.getElementById('wizSteps').innerHTML=steps.map((lbl,i)=>{
+    const n=i+1,cls=n<wStep?'done':n===wStep?'active':'';
+    return `<div class="step ${cls}"><div class="step-c">${n<wStep?'✓':n}</div><div class="step-lbl">${lbl}</div></div>`;
+  }).join('');
+  const c=document.getElementById('wizContent');
+  if(wStep===1)c.innerHTML=renderStep1();
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else c.innerHTML=renderStep2Sensor();}
+  else c.innerHTML=renderStep3();
+}
+
+function renderStep1(){
+  return [
+    {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light'},
+    {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'sensor: temperature, humidity, battery, signal'},
+  ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
+    <div class="type-icon">${t.icon}</div>
+    <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
+}
+function pickType(t){wType=t;renderWiz();}
+
+function renderStep2Relay(){
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('plist').innerHTML=relayItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('plist').innerHTML=relayItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="plist">${relayItems()}</div>
+    </div>
+    ${wData.entity_id?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(wData.entity_id)}</b></div>`:''}`;
+}
+function relayItems(){
+  const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Relay();}
+
+const SENSOR_SLOTS=[
+  {key:'temperature_entity',label:'🌡 Температура',cls:'temperature',req:true},
+  {key:'humidity_entity',label:'💧 Влажность',cls:'humidity',req:true},
+  {key:'battery_entity',label:'🔋 Заряд батареи',cls:'battery',req:false},
+  {key:'signal_entity',label:'📶 Сила сигнала',cls:'signal_strength',req:false},
+];
+function renderStep2Sensor(){
+  const slots=SENSOR_SLOTS.map(s=>{
+    const val=wData[s.key];const entity=val?haSensors.find(x=>x.entity_id===val):null;
+    return `<div class="sf"><label>${s.label}${s.req?' <span style="color:var(--danger)">*</span>':''}</label>
+      <button class="sf-btn ${val?'filled':''}" onclick="openSP('${s.key}')">
+        <span>${val?(entity?.friendly_name||val):'Выбрать сенсор…'}</span><span>${val?'✓':'▾'}</span></button>
+      ${val?`<div class="sf-sub">${esc(val)} <button class="sf-clr" onclick="clearSP('${s.key}')">✕</button></div>`:''}</div>`;
+  }).join('');
+  return `<div style="margin-bottom:12px;font-size:12px;color:var(--muted)">Температура или влажность обязательны.</div>
+    <div class="sg">${slots}</div>
+    <div id="spWrap" class="sp-wrap" style="display:none">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="spInput" type="text" placeholder="Поиск…" oninput="renderSPList(this.value)"/>
+          <button class="clr" onclick="spInput.value='';renderSPList('')">✕</button>
+        </div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" id="spList"></div>
+      </div>
+    </div>`;
+}
+function openSP(key){spField=key;document.getElementById('spWrap').style.display='';document.getElementById('spInput').value='';renderSPList('');document.getElementById('spWrap').scrollIntoView({behavior:'smooth'});}
+function renderSPList(q){
+  q=(q||'').toLowerCase();
+  const clsMap={temperature_entity:'temperature',humidity_entity:'humidity',battery_entity:'battery',signal_entity:'signal_strength'};
+  let list=clsMap[spField]?haSensors.filter(s=>s.device_class===clsMap[spField]):haSensors;
+  if(q)list=list.filter(s=>(s.area+s.device_class+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('spList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[spField]===s.entity_id?'sel':''}" onclick="pickSensor('${esc(s.entity_id)}','${esc(s.friendly_name)}','${esc(s.area)}')">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Не найдено</div>`;
+}
+function pickSensor(eid,name,area){if(!spField)return;wData[spField]=eid;wData[spField+'_name']=name;wData[spField+'_area']=area;spField=null;document.getElementById('wizContent').innerHTML=renderStep2Sensor();}
+function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[key+'_area'];document.getElementById('wizContent').innerHTML=renderStep2Sensor();}
+
+function renderStep3(){
+  let defName='',defRoom='';
+  if(wType==='relay'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
+  return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
+    <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/></div>
+    <div class="fg"><label>ID <span style="color:var(--danger)">*</span></label>
+    <input type="text" id="dId" value="${esc(wData.id||slugify(wData.name||defName))}" placeholder="relay_living_room"/>
+    <div class="hint">Только a–z, 0–9, _ . Уникальный идентификатор в Сбере.</div></div>
+    <div class="fg"><label>Комната</label>
+    <input type="text" id="dRoom" value="${esc(wData.room!==undefined?wData.room:defRoom)}" placeholder="Гостиная"/></div>`;
+}
+function autoId(){const n=document.getElementById('dName')?.value||'';const f=document.getElementById('dId');if(f&&(!wData.id||f.value===slugify(wData.name||'')))f.value=slugify(n);}
+
+async function submitDevice(){
+  const attrs={};
+  if(wType==='relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
+  else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
+  const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
+  const btn=document.getElementById('btnNext');btn.disabled=true;btn.innerHTML='<div class="spin"></div>';
+  try{await api('/api/sber_mqtt/devices',{method:'POST',body:JSON.stringify(body)});closeWizard();toast('Устройство добавлено','ok');await loadDevices();}
+  catch(e){toast('Ошибка: '+e.message,'err');btn.disabled=false;btn.textContent='Готово ✓';}
+}
+
+async function fetchRelay(){if(haRelay.length)return;try{haRelay=(await api('/api/sber_mqtt/ha_entities/relay')).entities||[];}catch(e){toast('Ошибка загрузки сущностей','err');}}
+async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,battery,signal_strength')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
+
+function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function slugify(t){const m={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'j',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',' ':'_'};return t.toLowerCase().split('').map(c=>m[c]!==undefined?m[c]:(/[a-z0-9]/.test(c)?c:'_')).join('').replace(/_+/g,'_').replace(/^_|_$/g,'')||'device';}
+let toastT=null;
+function toast(msg,type=''){const el=document.getElementById('toast');el.textContent=msg;el.className='toast '+type+' show';clearTimeout(toastT);toastT=setTimeout(()=>el.classList.remove('show'),3200);}
+
+async function init(){
+  await Promise.all([loadStatus(),loadDevices()]);
+  setInterval(loadStatus,30000);
+}
+
+window.addEventListener('load',()=>{
+  if(getToken()){showMain();init();}
+  else{showTokenScreen();}
+});
+</script>
+</body>
+</html>

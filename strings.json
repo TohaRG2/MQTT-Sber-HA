@@ -1,0 +1,38 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Подключение к MQTT Сбера",
+        "description": "Введите данные для подключения к MQTT-брокеру Сбера (sberdevices.ru)",
+        "data": {
+          "mqtt_login": "Логин MQTT",
+          "mqtt_password": "Пароль MQTT",
+          "mqtt_broker": "Адрес брокера",
+          "mqtt_port": "Порт"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Не удалось подключиться к MQTT-брокеру. Проверьте данные.",
+      "invalid_auth": "Неверный логин или пароль.",
+      "unknown": "Неизвестная ошибка."
+    },
+    "abort": {
+      "already_configured": "Интеграция уже настроена.",
+      "cannot_connect": "Не удалось подключиться к MQTT-брокеру."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Настройки подключения",
+        "data": {
+          "mqtt_login": "Логин MQTT",
+          "mqtt_password": "Пароль MQTT",
+          "mqtt_broker": "Адрес брокера",
+          "mqtt_port": "Порт"
+        }
+      }
+    }
+  }
+}
