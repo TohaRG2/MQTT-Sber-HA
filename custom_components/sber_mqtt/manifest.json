@@ -1,0 +1,14 @@
+{
+  "domain": "sber_mqtt",
+  "name": "Sber MQTT Bridge",
+  "documentation": "https://github.com/TohaRG2/MQTT-Sber-HA",
+  "issue_tracker": "https://github.com/TohaRG2/MQTT-Sber-HA/issues",
+  "dependencies": [],
+  "codeowners": [
+    "@TohaRG2"
+  ],
+  "requirements": ["paho-mqtt>=1.6.1"],
+  "config_flow": true,
+  "iot_class": "cloud_push",
+  "version": "1.0.0"
+}
