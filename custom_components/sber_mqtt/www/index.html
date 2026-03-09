@@ -85,12 +85,6 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 @keyframes sp{to{transform:rotate(360deg)}}
 .loading{display:flex;align-items:center;justify-content:center;padding:40px}
 
-/* Token form */
-.token-screen{display:flex;align-items:center;justify-content:center;min-height:80vh}
-.token-box{background:var(--card);border-radius:14px;padding:32px;max-width:480px;width:100%;box-shadow:var(--shadow);border:1px solid var(--border)}
-.token-box h2{margin-bottom:8px;font-size:18px}.token-box p{font-size:13px;color:var(--muted);margin-bottom:20px;line-height:1.6}
-.token-box ol{font-size:13px;color:var(--muted);padding-left:20px;margin-bottom:20px;line-height:2}
-.token-box ol b{color:var(--text)}
 </style>
 </head>
 <body>
@@ -106,13 +100,17 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
   </div>
 </div>
 
-<div class="main" id="mainContent" style="display:none">
+<div class="main" id="mainContent">
   <div class="toolbar">
     <div class="toolbar-l" id="cntLabel">Загрузка…</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button class="btn btn-ghost" onclick="doPublishConfig()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
         Обновить в Сбере
+      </button>
+      <button class="btn btn-ghost" onclick="doPublishStatus()">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M2 12l10 10 10-10h-6V2H8v10H2z"/></svg>
+        Отправить состояния
       </button>
       <button class="btn btn-primary" onclick="openWizard()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
@@ -138,24 +136,6 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
   </div>
 </div>
 
-<!-- Token input screen (shown when no token found) -->
-<div class="main token-screen" id="tokenScreen" style="display:none">
-  <div class="token-box">
-    <h2>🔑 Требуется авторизация</h2>
-    <p>Для работы панели необходим Long-Lived Access Token из Home Assistant.</p>
-    <ol>
-      <li>Нажмите на <b>ваш профиль</b> в левом нижнем углу HA</li>
-      <li>Прокрутите вниз до раздела <b>«Долгосрочные токены доступа»</b></li>
-      <li>Нажмите <b>«Создать токен»</b>, введите любое имя</li>
-      <li>Скопируйте токен и вставьте ниже</li>
-    </ol>
-    <div class="fg">
-      <label>Long-Lived Access Token</label>
-      <input type="text" id="tokenInput" placeholder="eyJhbGciOiJIUzI1NiIs..." />
-    </div>
-    <button class="btn btn-primary" style="width:100%" onclick="saveToken()">Сохранить и войти</button>
-  </div>
-</div>
 
 <!-- ADD WIZARD -->
 <div id="wiz" class="overlay" style="display:none">
@@ -190,47 +170,15 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 <div class="toast" id="toast"></div>
 
 <script>
-// ================================================================
-// TOKEN MANAGEMENT
-// Token is stored in localStorage of this page.
-// On first visit user pastes a Long-Lived Access Token.
-// ================================================================
-const TOKEN_KEY = 'sber_mqtt_ha_token';
-
-function getToken() {
-  return localStorage.getItem(TOKEN_KEY) || null;
-}
-function saveToken() {
-  const val = document.getElementById('tokenInput').value.trim();
-  if (!val) { toast('Введите токен','err'); return; }
-  localStorage.setItem(TOKEN_KEY, val);
-  showMain();
-  init();
-}
-function clearToken() {
-  localStorage.removeItem(TOKEN_KEY);
-  showTokenScreen();
-}
-function showMain() {
-  document.getElementById('mainContent').style.display = '';
-  document.getElementById('tokenScreen').style.display = 'none';
-}
-function showTokenScreen() {
-  document.getElementById('mainContent').style.display = 'none';
-  document.getElementById('tokenScreen').style.display = '';
-}
-
 // ── API ──────────────────────────────────────────────────────────
+// Токен вшит в страницу сервером (window.HA_ACCESS_TOKEN).
+// Используется для Bearer авторизации API запросов.
+let _token = window.HA_ACCESS_TOKEN || null;
+
 async function api(url, opts={}) {
-  const token = getToken();
   const headers = { 'Content-Type': 'application/json' };
-  if (token) headers['Authorization'] = 'Bearer ' + token;
+  if (_token) headers['Authorization'] = 'Bearer ' + _token;
   const r = await fetch(url, { headers, ...opts });
-  if (r.status === 401) {
-    // Token is invalid — ask user to re-enter
-    clearToken();
-    throw new Error('Токен недействителен. Введите новый токен.');
-  }
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
     throw new Error(e.error || `HTTP ${r.status}`);
@@ -323,6 +271,21 @@ async function doPublishConfig(){
   catch(e){toast('Ошибка: '+e.message,'err');}
 }
 
+async function doPublishStatus(){
+  try{
+    const r=await api('/api/sber_mqtt/publish_status',{method:'POST'});
+    if(r.ok){
+      // Обновляем last_state в локальном массиве и перерисовываем таблицу
+      for(const [device_id, last] of Object.entries(r.states||{})){
+        const d=devices.find(x=>x.id===device_id);
+        if(d) d.last_state=last;
+      }
+      renderTable();
+      toast(`Состояния (${Object.keys(r.states||{}).length} устройств) отправлены`,'ok');
+    }
+  } catch(e){toast('Ошибка: '+e.message,'err');}
+}
+
 function askDel(id,name){delId=id;document.getElementById('confTxt').textContent=`Устройство «${name}» будет удалено.`;document.getElementById('conf').style.display='flex';}
 function closeConf(){delId=null;document.getElementById('conf').style.display='none';}
 async function doDelete(){
@@ -332,13 +295,17 @@ async function doDelete(){
 }
 
 function openWizard(){
-  wStep=1;wType=null;wData={};sFilter='';spField=null;
-  // Сбрасываем кэш сущностей чтобы подтянуть актуальный список из HA
-  haRelay=[];haSensors=[];
+  // Состояние уже сброшено в closeWizard(), просто показываем и рендерим
   document.getElementById('wiz').style.display='flex';
   renderWiz();
 }
-function closeWizard(){document.getElementById('wiz').style.display='none';}
+function closeWizard(){
+  document.getElementById('wiz').style.display='none';
+  // Полный сброс состояния чтобы следующее открытие начиналось чисто
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];
+  const btn=document.getElementById('btnNext');
+  if(btn){btn.disabled=false;btn.textContent='Далее →';}
+}
 
 async function wizNext(){
   if(!await wizValidate())return;
@@ -372,6 +339,11 @@ async function wizValidate(){
     const name=document.getElementById('dName')?.value?.trim();
     const id=document.getElementById('dId')?.value?.trim();
     if(!name){toast('Введите имя','err');return false;}
+    // Валидация имени по требованиям Салюта: только русские буквы, цифры и пробелы, 3–33 символа
+    if(!/^[а-яёА-ЯЁ0-9 ]{3,33}$/.test(name)){
+      toast('Имя: только русские буквы, цифры и пробелы, от 3 до 33 символов','err');
+      return false;
+    }
     if(!id){toast('Введите ID','err');return false;}
     if(!/^[a-z0-9_]+$/.test(id)){toast('ID: только a-z, 0-9 и _','err');return false;}
     if(devices.find(d=>d.id===id)){toast(`ID «${id}» уже занят`,'err');return false;}
@@ -397,7 +369,7 @@ function renderWiz(){
 
 function renderStep1(){
   return [
-    {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light'},
+    {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light, media_player'},
     {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'sensor: temperature, humidity, battery, signal'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
@@ -473,7 +445,8 @@ function renderStep3(){
   if(wType==='relay'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
-    <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/></div>
+    <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
+    <div style="font-size:11px;color:var(--text-muted,#888);margin-top:4px">Только русские буквы, цифры и пробелы · от 3 до 33 символов</div></div>
     <div class="fg"><label>ID <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dId" value="${esc(wData.id||slugify(wData.name||defName))}" placeholder="relay_living_room"/>
     <div class="hint">Только a–z, 0–9, _ . Уникальный идентификатор в Сбере.</div></div>
@@ -505,10 +478,7 @@ async function init(){
   setInterval(loadStatus,30000);
 }
 
-window.addEventListener('load',()=>{
-  if(getToken()){showMain();init();}
-  else{showTokenScreen();}
-});
+window.addEventListener('load', init);
 </script>
 </body>
 </html>

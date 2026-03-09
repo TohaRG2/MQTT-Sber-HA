@@ -290,6 +290,52 @@ class SberPublishConfigView(HomeAssistantView):
         return web.json_response({"ok": True, "devices_count": len(registry.devices)})
 
 
+
+# ── POST /api/sber_mqtt/publish_status ───────────────────────────────────────
+
+class SberPublishStatusView(HomeAssistantView):
+    """Ручная отправка текущих состояний всех устройств в Сбер.
+
+    Читает актуальные состояния из HA, отправляет в Сбер и возвращает
+    словарь {device_id: last_state} для обновления таблицы в панели.
+    """
+
+    url  = "/api/sber_mqtt/publish_status"
+    name = "api:sber_mqtt:publish_status"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def post(self, request: web.Request) -> web.Response:
+        import json as _json
+        hass: HomeAssistant = request.app["hass"]
+        data = _get_entry_data(hass)
+        if not data:
+            return web.json_response({"error": "Integration not loaded"}, status=503)
+
+        registry    = data["device_registry"]
+        serializer  = data["serializer"]
+        mqtt_client = data["mqtt_client"]
+
+        from .__init__ import _build_current_state_payload
+
+        updated_states = {}  # device_id → last_state для возврата в панель
+
+        for device_id, device in registry.devices.items():
+            payload = _build_current_state_payload(hass, device_id, device, serializer)
+            if not payload:
+                continue
+            mqtt_client.publish_status(payload)
+            # Сохраняем last_state и собираем для ответа
+            last = _json.loads(payload)["devices"][device_id]
+            await registry.async_update_last_state(device_id, last)
+            updated_states[device_id] = last
+
+        _LOGGER.info("Ручная публикация статусов: %d устройств", len(updated_states))
+        return web.json_response({"ok": True, "states": updated_states})
+
+
 # ── GET /api/sber_mqtt/device_types ───────────────────────────────────────
 
 class SberDeviceTypesView(HomeAssistantView):
@@ -305,6 +351,42 @@ class SberDeviceTypesView(HomeAssistantView):
     async def get(self, request: web.Request) -> web.Response:
         types = [{"id": k, "name": v} for k, v in SUPPORTED_DEVICE_TYPES.items()]
         return web.json_response({"device_types": types})
+
+
+# ── GET /api/sber_mqtt/panel ──────────────────────────────────────────────────
+
+class SberPanelView(HomeAssistantView):
+    """Отдаёт index.html с токеном вшитым прямо в HTML.
+
+    requires_auth=False потому что iframe не передаёт cookie сессии.
+    Токен из config entry вшивается в страницу как JS переменная —
+    панель использует его для Bearer авторизации API запросов.
+    """
+
+    url  = "/api/sber_mqtt/panel"
+    name = "api:sber_mqtt:panel"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from pathlib import Path
+        hass: HomeAssistant = request.app["hass"]
+
+        token = ""
+        data = _get_entry_data(hass)
+        if data:
+            token = data["config"].get("ha_token", "")
+
+        html_path = Path(__file__).parent / "www" / "index.html"
+        html = html_path.read_text(encoding="utf-8")
+
+        # Вшиваем токен в страницу — JS читает window.HA_ACCESS_TOKEN при загрузке
+        inject = f'<script>\nwindow.HA_ACCESS_TOKEN = {repr(token)};\n</script>\n'
+        html = html.replace("</head>", inject + "</head>", 1)
+
+        return web.Response(text=html, content_type="text/html")
 
 
 # ── GET /api/sber_mqtt/status ─────────────────────────────────────────────

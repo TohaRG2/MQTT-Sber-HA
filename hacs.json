@@ -2,6 +2,6 @@
   "name": "Sber MQTT Bridge",
   "content_in_root": false,
   "render_readme": true,
-  "homeassistant": "2026.9.1",
+  "homeassistant": "2026.3.0",
   "filename": "sber_mqtt.zip"
 }

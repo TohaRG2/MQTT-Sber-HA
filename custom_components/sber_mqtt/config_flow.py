@@ -24,6 +24,7 @@ from .const import (
     CONF_MQTT_PASSWORD,
     CONF_MQTT_BROKER,
     CONF_MQTT_PORT,
+    CONF_HA_TOKEN,
     DEFAULT_MQTT_BROKER,
     DEFAULT_MQTT_PORT,
 )
@@ -35,6 +36,7 @@ _LOGGER = logging.getLogger(__name__)
 STEP_USER_SCHEMA = vol.Schema({
     vol.Required(CONF_MQTT_LOGIN):                                   str,  # Логин Сбера
     vol.Required(CONF_MQTT_PASSWORD):                                str,  # Пароль
+    vol.Required(CONF_HA_TOKEN):                                     str,  # Long-Lived Access Token
     vol.Optional(CONF_MQTT_BROKER, default=DEFAULT_MQTT_BROKER):    str,  # Адрес брокера
     vol.Optional(CONF_MQTT_PORT,   default=DEFAULT_MQTT_PORT):      int,  # Порт
 })
@@ -111,10 +113,11 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
 
         # Форма с предзаполненными текущими значениями
         schema = vol.Schema({
-            vol.Required(CONF_MQTT_LOGIN,   default=current.get(CONF_MQTT_LOGIN, "")):              str,
-            vol.Required(CONF_MQTT_PASSWORD, default=current.get(CONF_MQTT_PASSWORD, "")):          str,
-            vol.Optional(CONF_MQTT_BROKER,  default=current.get(CONF_MQTT_BROKER, DEFAULT_MQTT_BROKER)): str,
-            vol.Optional(CONF_MQTT_PORT,    default=current.get(CONF_MQTT_PORT,   DEFAULT_MQTT_PORT)):   int,
+            vol.Required(CONF_MQTT_LOGIN,    default=current.get(CONF_MQTT_LOGIN, "")):                str,
+            vol.Required(CONF_MQTT_PASSWORD, default=current.get(CONF_MQTT_PASSWORD, "")):              str,
+            vol.Required(CONF_HA_TOKEN,      default=current.get(CONF_HA_TOKEN, "")):                   str,
+            vol.Optional(CONF_MQTT_BROKER,   default=current.get(CONF_MQTT_BROKER, DEFAULT_MQTT_BROKER)): str,
+            vol.Optional(CONF_MQTT_PORT,     default=current.get(CONF_MQTT_PORT,   DEFAULT_MQTT_PORT)):   int,
         })
 
         return self.async_show_form(

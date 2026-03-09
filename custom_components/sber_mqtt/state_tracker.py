@@ -131,7 +131,11 @@ class StateTracker:
                 return  # изменилась не наша сущность
 
             # Определяем новое значение on/off
-            is_on = new_state.state == "on"
+            # Для media_player: "off" = выключен, остальные состояния (on/idle/playing/paused) = включён
+            if changed_entity_id.startswith("media_player."):
+                is_on = new_state.state != "off"
+            else:
+                is_on = new_state.state == "on"
 
             # Проверка на дубль: не отправляем если состояние не изменилось.
             # last_state теперь хранит {"states": [{"key": "on_off", "value": {...}}]}

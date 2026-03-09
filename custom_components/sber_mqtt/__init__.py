@@ -50,11 +50,11 @@ _LOGGER = logging.getLogger(__name__)
 
 # Guards: HTTP views and panel must only be registered once per HA process lifetime.
 # They survive config entry reloads — re-registering would raise an error.
-# Флаги регистрации — HTTP API и панель регистрируются только один раз
+# Флаги регистрации — HTTP API регистрируется только один раз
 # за жизнь процесса HA. При reload интеграции повторная регистрация
 # не нужна и вызвала бы ошибку «route already exists».
+# Панель перерегистрируется при каждом setup (с актуальным токеном в URL).
 _HTTP_VIEWS_REGISTERED = False
-_PANEL_REGISTERED = False
 
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
@@ -64,7 +64,7 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Инициализация интеграции при загрузке HA или после добавления через UI."""
-    global _HTTP_VIEWS_REGISTERED, _PANEL_REGISTERED
+    global _HTTP_VIEWS_REGISTERED
 
     hass.data.setdefault(DOMAIN, {})
 
@@ -123,10 +123,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _register_http_views(hass)
         _HTTP_VIEWS_REGISTERED = True
 
-    # 8. Sidebar panel — register once per HA process lifetime
-    if not _PANEL_REGISTERED:
-        await _async_register_panel(hass)
-        _PANEL_REGISTERED = True
+    # 8. Sidebar panel — перерегистрируем при каждом setup
+    await _async_register_panel(hass)
 
     # 9. Publish initial config to Sber
     if connected:
@@ -174,6 +172,8 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesRelayView,
         SberHASensorsView,
         SberPublishConfigView,
+        SberPublishStatusView,
+        SberPanelView,
         SberDeviceTypesView,
         SberConnectionStatusView,
     )
@@ -182,6 +182,8 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesRelayView(hass))
     hass.http.register_view(SberHASensorsView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
+    hass.http.register_view(SberPublishStatusView(hass))
+    hass.http.register_view(SberPanelView(hass))
     hass.http.register_view(SberDeviceTypesView(hass))
     hass.http.register_view(SberConnectionStatusView(hass))
 
@@ -191,41 +193,30 @@ def _register_http_views(hass: HomeAssistant) -> None:
 # ------------------------------------------------------------------ #
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
-    """Register the SPA panel in the HA sidebar.
+    """Регистрирует панель в боковом меню HA.
 
-    Served as an iframe from /sber_mqtt_static/index.html.
-    Because the static files are served by the HA HTTP server itself
-    (same origin), the browser automatically includes the HA session
-    cookie, so API calls from the SPA are authenticated.
+    Панель открывается через динамический эндпоинт /api/sber_mqtt/panel.
+    Авторизация API запросов из панели происходит через cookie сессии HA
+    (credentials: include) — никакой токен не нужен.
     """
-    www_path = Path(__file__).parent / "www"
-    if www_path.exists():
-        try:
-            from homeassistant.components.http import StaticPathConfig
-            await hass.http.async_register_static_paths([
-                StaticPathConfig("/sber_mqtt_static", str(www_path), False)
-            ])
-        except (ImportError, AttributeError, TypeError):
-            try:
-                hass.http.register_static_path(
-                    "/sber_mqtt_static", str(www_path), cache_headers=False
-                )
-            except Exception:
-                hass.http.register_static_path(
-                    "/sber_mqtt_static", str(www_path)
-                )
-
     from homeassistant.components import frontend
+
+    # Удаляем старую панель если уже зарегистрирована
+    try:
+        frontend.async_remove_panel(hass, "sber_mqtt_panel")
+    except Exception:
+        pass
+
     frontend.async_register_built_in_panel(
         hass,
         component_name="iframe",
         sidebar_title="Sber MQTT",
         sidebar_icon="mdi:connection",
         frontend_url_path="sber_mqtt_panel",
-        config={"url": "/sber_mqtt_static/index.html"},
+        config={"url": "/api/sber_mqtt/panel"},
         require_admin=True,
     )
-    _LOGGER.info("Панель Sber MQTT зарегистрирована в боковом меню HA")
+    _LOGGER.info("Панель Sber MQTT зарегистрирована")
 
 
 # ── Фабрики колбэков (замыкания) ──────────────────────────────────────────
@@ -321,7 +312,11 @@ def _build_current_state_payload(
             is_on = False
         else:
             state = hass.states.get(entity_id)
-            is_on = (state.state == "on") if state else False
+            if state:
+                # media_player: всё кроме "off" считается включённым
+                is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
+            else:
+                is_on = False
         return serializer.build_relay_state_payload(device_id, is_on)
 
     if device_type == "sensor_temp":

@@ -111,6 +111,13 @@ class HACommandHandler:
                 "homeassistant", service, {"entity_id": entity_id}, blocking=False
             )
 
+        elif domain == "media_player":
+            # Медиаплеер: turn_on / turn_off через домен media_player
+            service = "turn_on" if on_off_value else "turn_off"
+            await self._hass.services.async_call(
+                "media_player", service, {"entity_id": entity_id}, blocking=False
+            )
+
         else:
             _LOGGER.warning(
                 "Реле %s: домен '%s' не поддерживается для управления",

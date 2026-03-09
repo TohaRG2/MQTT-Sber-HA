@@ -18,7 +18,7 @@ from homeassistant.helpers import (
 _LOGGER = logging.getLogger(__name__)
 
 # Домены HA которые можно привязать как реле
-RELAY_DOMAINS = ["switch", "input_boolean", "script", "button", "input_button", "light"]
+RELAY_DOMAINS = ["switch", "input_boolean", "script", "button", "input_button", "light", "media_player"]
 
 # Домены для датчиков (только sensor)
 SENSOR_TEMP_DOMAINS = ["sensor"]
@@ -104,7 +104,14 @@ def get_sensor_entities(hass: HomeAssistant, device_classes: list[str]) -> list[
 
     device_classes — список допустимых классов, например:
     ["temperature", "humidity", "battery", "signal_strength"]
+
+    Особый случай: сенсоры силы сигнала (signal_strength) от Zigbee2MQTT
+    часто не имеют device_class, но имеют unit_of_measurement: lqi, dBm или rssi.
+    Такие сенсоры включаются в список если запрошен класс "signal_strength".
     """
+    # Единицы измерения которые однозначно указывают на сенсор силы сигнала
+    SIGNAL_UNITS = {"lqi", "dbm", "rssi", "%"}
+
     entity_reg = er.async_get(hass)
     result = []
 
@@ -130,7 +137,18 @@ def get_sensor_entities(hass: HomeAssistant, device_classes: list[str]) -> list[
 
         # Фильтруем по запрошенным классам
         if dc not in device_classes:
-            continue
+            # Особый случай: сенсор без device_class, но с единицами измерения сигнала
+            # (например Zigbee2MQTT linkquality — unit_of_measurement: lqi)
+            if "signal_strength" not in device_classes:
+                continue
+            state = hass.states.get(entry.entity_id)
+            unit = ""
+            if state:
+                unit = state.attributes.get("unit_of_measurement", "").lower()
+            if unit not in SIGNAL_UNITS:
+                continue
+            # Помечаем как signal_strength для корректного отображения в UI
+            dc = "signal_strength"
 
         state = hass.states.get(entry.entity_id)
         if state:

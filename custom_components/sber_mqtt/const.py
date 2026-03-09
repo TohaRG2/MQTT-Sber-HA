@@ -7,6 +7,7 @@ DOMAIN = "sber_mqtt"
 # ── Ключи настроек (хранятся в config entry) ──────────────────────────────
 CONF_MQTT_LOGIN    = "mqtt_login"     # Логин для подключения к брокеру Сбера
 CONF_MQTT_PASSWORD = "mqtt_password"  # Пароль
+CONF_HA_TOKEN      = "ha_token"       # Long-Lived Access Token для панели управления
 CONF_MQTT_BROKER   = "mqtt_broker"    # Адрес брокера (можно переопределить)
 CONF_MQTT_PORT     = "mqtt_port"      # Порт брокера
 
@@ -40,14 +41,15 @@ SUPPORTED_DEVICE_TYPES = {
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
 # Только сущности из этих доменов можно привязать как реле
-RELAY_DOMAINS = {"switch", "input_boolean", "script", "button", "input_button", "light"}
+RELAY_DOMAINS = {"switch", "input_boolean", "script", "button", "input_button", "light", "media_player"}
 
 # Домены у которых нет состояния on/off (кнопки, сценарии)
 # Для них всегда отправляем on_off=false и не отслеживаем изменения состояния
 RELAY_BUTTON_DOMAINS = {"script", "button", "input_button"}
 
 # Домены у которых есть состояние on/off (отслеживаем через state_tracker)
-RELAY_STATEFUL_DOMAINS = {"switch", "input_boolean", "light"}
+# media_player: состояние "off" → выключен, всё остальное (on/idle/playing/paused) → включён
+RELAY_STATEFUL_DOMAINS = {"switch", "input_boolean", "light", "media_player"}
 
 # ── Хранилище ─────────────────────────────────────────────────────────────
 STORAGE_KEY     = "sber_mqtt_devices"  # Ключ в .storage/

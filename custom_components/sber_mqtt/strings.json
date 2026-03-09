@@ -3,12 +3,13 @@
     "step": {
       "user": {
         "title": "Подключение к MQTT Сбера",
-        "description": "Введите данные для подключения к MQTT-брокеру Сбера (sberdevices.ru)",
+        "description": "Введите данные для подключения к MQTT-брокеру Сбера.\n\nТокен доступа можно создать в профиле HA: Профиль → Долгосрочные токены доступа → Создать токен.",
         "data": {
           "mqtt_login": "Логин MQTT",
           "mqtt_password": "Пароль MQTT",
           "mqtt_broker": "Адрес брокера",
-          "mqtt_port": "Порт"
+          "mqtt_port": "Порт",
+          "ha_token": "Long-Lived Access Token"
         }
       }
     },
@@ -30,7 +31,8 @@
           "mqtt_login": "Логин MQTT",
           "mqtt_password": "Пароль MQTT",
           "mqtt_broker": "Адрес брокера",
-          "mqtt_port": "Порт"
+          "mqtt_port": "Порт",
+          "ha_token": "Long-Lived Access Token"
         }
       }
     }

@@ -10,5 +10,5 @@
   "config_flow": true,
   "iot_class": "cloud_push",
   "homeassistant": "2026.3.0",
-  "version": "1.0.0"
+  "version": "0.1.0"
 }
