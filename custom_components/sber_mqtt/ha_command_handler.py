@@ -43,6 +43,8 @@ class HACommandHandler:
         elif device_type == "scenario_button":
             # Сценарные кнопки только отправляют события в Сбер, команды не принимают
             _LOGGER.debug("Команда для сценарной кнопки %s проигнорирована", device.get("id"))
+        elif device_type == "hvac_ac":
+            await self._handle_hvac_ac_command(device, states)
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -126,3 +128,67 @@ class HACommandHandler:
                 "Реле %s: домен '%s' не поддерживается для управления",
                 device.get("id"), domain,
             )
+
+    async def _handle_hvac_ac_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления кондиционером от Сбера.
+
+        Поддерживаемые команды:
+          on_off         — включить/выключить (climate.turn_on / climate.turn_off)
+          hvac_temp_set  — установить целевую температуру (climate.set_temperature)
+          hvac_work_mode — установить режим работы (climate.set_hvac_mode)
+        """
+        from .const import SBER_HVAC_MODE_TO_HA
+
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+
+        if not entity_id:
+            _LOGGER.error("Кондиционер %s: не задан entity_id", device.get("id"))
+            return
+
+        for state in states:
+            key     = state.get("key")
+            val_obj = state.get("value", {})
+
+            if key == "on_off":
+                raw = val_obj.get("bool_value")
+                if isinstance(raw, bool):
+                    is_on = raw
+                elif isinstance(raw, str):
+                    is_on = raw.lower() in ("true", "1", "on")
+                else:
+                    is_on = False
+                service = "turn_on" if is_on else "turn_off"
+                _LOGGER.info("HVAC %s: on_off=%s → climate.%s", device.get("id"), is_on, service)
+                await self._hass.services.async_call(
+                    "climate", service, {"entity_id": entity_id}, blocking=False
+                )
+
+            elif key == "hvac_temp_set":
+                temp = val_obj.get("integer_value")
+                if temp is not None:
+                    try:
+                        temp_f = float(temp)
+                        _LOGGER.info("HVAC %s: set_temperature=%.1f", device.get("id"), temp_f)
+                        await self._hass.services.async_call(
+                            "climate", "set_temperature",
+                            {"entity_id": entity_id, "temperature": temp_f},
+                            blocking=False,
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning("HVAC %s: невалидная температура: %s", device.get("id"), temp)
+
+            elif key == "hvac_work_mode":
+                sber_mode = val_obj.get("enum_value", "")
+                ha_mode   = SBER_HVAC_MODE_TO_HA.get(sber_mode)
+                if ha_mode:
+                    _LOGGER.info("HVAC %s: set_hvac_mode=%s (sber=%s)", device.get("id"), ha_mode, sber_mode)
+                    await self._hass.services.async_call(
+                        "climate", "set_hvac_mode",
+                        {"entity_id": entity_id, "hvac_mode": ha_mode},
+                        blocking=False,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "HVAC %s: неизвестный режим Сбера '%s'", device.get("id"), sber_mode
+                    )

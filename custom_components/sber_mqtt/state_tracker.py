@@ -24,12 +24,14 @@ from .const import (
     DEVICE_TYPE_RELAY,
     DEVICE_TYPE_SENSOR_TEMP,
     DEVICE_TYPE_SCENARIO_BUTTON,
+    DEVICE_TYPE_HVAC_AC,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
     SCENARIO_BUTTON_PUSH_DOMAINS,
     SCENARIO_BUTTON_CLICK,
     SCENARIO_BUTTON_DOUBLE_CLICK,
+    HA_HVAC_MODE_TO_SBER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -104,6 +106,15 @@ class StateTracker:
                 # Для push-доменов (button, input_button, script) — следим за last_triggered/state
                 if entity_id:
                     watched.add(entity_id)
+
+            elif device_type == DEVICE_TYPE_HVAC_AC:
+                # Отслеживаем climate-сущность и опциональный датчик температуры
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                temp_entity = attrs.get("temperature_entity", "")
+                if temp_entity:
+                    watched.add(temp_entity)
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -210,6 +221,55 @@ class StateTracker:
             )
 
             payload = self._serializer.build_scenario_button_event_payload(device_id, event)
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_HVAC_AC:
+            # Отслеживаем и climate-сущность, и опциональный датчик температуры
+            climate_entity = attrs.get("entity_id", "")
+            temp_entity    = attrs.get("temperature_entity", "")
+            if changed_entity_id not in {climate_entity, temp_entity}:
+                return
+
+            # Читаем состояние climate-сущности
+            climate_state = self._hass.states.get(climate_entity)
+            if not climate_state:
+                return
+
+            is_on       = climate_state.state != "off"
+            target_temp = climate_state.attributes.get("temperature")
+            ha_mode     = climate_state.state if is_on else None
+            work_mode   = HA_HVAC_MODE_TO_SBER.get(ha_mode) if ha_mode else None
+
+            # Текущая температура — из внешнего датчика или из атрибутов climate
+            current_temp = None
+            if temp_entity:
+                s = self._hass.states.get(temp_entity)
+                if s and s.state not in ("unavailable", "unknown", ""):
+                    try:
+                        current_temp = float(s.state)
+                    except (ValueError, TypeError):
+                        pass
+            if current_temp is None:
+                ct = climate_state.attributes.get("current_temperature")
+                if ct is not None:
+                    try:
+                        current_temp = float(ct)
+                    except (ValueError, TypeError):
+                        pass
+
+            _LOGGER.debug(
+                "HVAC %s: is_on=%s target=%.1f mode=%s current_temp=%s",
+                device_id, is_on, target_temp or 0, work_mode, current_temp,
+            )
+
+            payload = self._serializer.build_hvac_ac_state_payload(
+                device_id, is_on, target_temp, work_mode, current_temp
+            )
             self._publish_status(payload)
 
             import json as _json

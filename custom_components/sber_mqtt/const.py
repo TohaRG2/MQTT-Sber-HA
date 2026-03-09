@@ -33,12 +33,14 @@ TOPIC_DOWN_ERRORS         = "sberdevices/v1/{login}/down/errors"               #
 DEVICE_TYPE_RELAY           = "relay"            # Реле: выключатели, кнопки, лампы, сценарии
 DEVICE_TYPE_SENSOR_TEMP     = "sensor_temp"      # Датчик температуры/влажности
 DEVICE_TYPE_SCENARIO_BUTTON = "scenario_button"  # Сценарная кнопка: прокидывает события из HA в Сбер
+DEVICE_TYPE_HVAC_AC         = "hvac_ac"          # Кондиционер
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_RELAY:           "Реле",
     DEVICE_TYPE_SENSOR_TEMP:     "Датчик температуры/влажности",
     DEVICE_TYPE_SCENARIO_BUTTON: "Сценарная кнопка",
+    DEVICE_TYPE_HVAC_AC:         "Кондиционер",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
@@ -84,3 +86,20 @@ SBER_MODEL_SENSOR_TEMP = "TEMP_HUM_SENSOR_1"
 # Числовое значение сигнала переводится в enum: low / medium / high
 SIGNAL_STRENGTH_LOW_THRESHOLD  = 30   # Ниже 30 → "low"
 SIGNAL_STRENGTH_HIGH_THRESHOLD = 70   # Выше 70 → "high", между → "medium"
+
+# ── Маппинг hvac_mode HA → hvac_work_mode Сбера ──────────────────────────
+# HA hvac_mode: off, cool, heat, fan_only, dry, auto, heat_cool
+# Сбер hvac_work_mode: cooling, heating, ventilation, dehumidification, auto
+HA_HVAC_MODE_TO_SBER = {
+    "cool":      "cooling",
+    "heat":      "heating",
+    "fan_only":  "ventilation",
+    "dry":       "dehumidification",
+    "auto":      "auto",
+    "heat_cool": "auto",
+}
+
+# Обратный маппинг: Сбер → HA hvac_mode
+SBER_HVAC_MODE_TO_HA = {v: k for k, v in HA_HVAC_MODE_TO_SBER.items()}
+# Разрешаем несколько значений вручную для конфликтов
+SBER_HVAC_MODE_TO_HA["auto"] = "auto"

@@ -62,6 +62,8 @@ from .const import (
     DEVICE_TYPE_RELAY,
     DEVICE_TYPE_SENSOR_TEMP,
     DEVICE_TYPE_SCENARIO_BUTTON,
+    DEVICE_TYPE_HVAC_AC,
+    HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
 )
@@ -119,6 +121,8 @@ class SberSerializer:
             return self._sensor_temp_config(device_id, device)
         if device_type == DEVICE_TYPE_SCENARIO_BUTTON:
             return self._scenario_button_config(device_id, device)
+        if device_type == DEVICE_TYPE_HVAC_AC:
+            return self._hvac_ac_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -212,6 +216,35 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _hvac_ac_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для кондиционера (hvac_ac).
+
+        Обязательные функции: online, on_off, hvac_temp_set.
+        Опциональные: hvac_work_mode, temperature (если задан датчик текущей температуры).
+        """
+        attrs = device.get("attributes", {})
+        features = ["online", "on_off", "hvac_temp_set", "hvac_work_mode"]
+        if attrs.get("temperature_entity"):
+            features.append("temperature")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_hvac_ac",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_hvac_ac",
+                "category": DEVICE_TYPE_HVAC_AC,
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
     # ── Payload состояния ──────────────────────────────────────────────────
 
     def build_root_state_payload(self) -> str:
@@ -259,6 +292,53 @@ class SberSerializer:
             }
         }
         return json.dumps(payload, ensure_ascii=False)
+
+    def build_hvac_ac_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        target_temp: float | None,
+        work_mode: str | None,
+        current_temp: float | None = None,
+    ) -> str:
+        """Состояние кондиционера.
+
+        is_on         — включён/выключён
+        target_temp   — целевая температура (hvac_temp_set), градусы °C
+        work_mode     — режим работы в терминах Сбера: cooling/heating/ventilation/…
+        current_temp  — текущая температура (temperature), если задан датчик; × 10
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+
+        if target_temp is not None:
+            try:
+                states.append({
+                    "key": "hvac_temp_set",
+                    "value": {"type": "INTEGER", "integer_value": round(float(target_temp))},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if work_mode:
+            states.append({
+                "key": "hvac_work_mode",
+                "value": {"type": "ENUM", "enum_value": work_mode},
+            })
+
+        if current_temp is not None:
+            try:
+                # Текущая температура передаётся × 10, как у датчика
+                states.append({
+                    "key": "temperature",
+                    "value": {"type": "INTEGER", "integer_value": round(float(current_temp) * 10)},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_sensor_temp_state_payload(
         self,

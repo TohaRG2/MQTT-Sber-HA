@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -171,6 +171,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberDeviceView,
         SberHAEntitiesRelayView,
         SberHASensorsView,
+        SberHAEntitiesClimateView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -181,6 +182,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberDeviceView(hass))
     hass.http.register_view(SberHAEntitiesRelayView(hass))
     hass.http.register_view(SberHASensorsView(hass))
+    hass.http.register_view(SberHAEntitiesClimateView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -354,5 +356,38 @@ def _build_current_state_payload(
         else:
             return None
         return serializer.build_scenario_button_event_payload(device_id, event)
+
+    if device_type == "hvac_ac":
+        entity_id = attrs.get("entity_id", "")
+        climate_state = hass.states.get(entity_id)
+        if not climate_state:
+            return None
+
+        is_on       = climate_state.state != "off"
+        target_temp = climate_state.attributes.get("temperature")
+        ha_mode     = climate_state.state if is_on else None
+        work_mode   = HA_HVAC_MODE_TO_SBER.get(ha_mode) if ha_mode else None
+
+        # Текущая температура — из внешнего датчика или из атрибутов climate
+        current_temp = None
+        temp_entity = attrs.get("temperature_entity", "")
+        if temp_entity:
+            s = hass.states.get(temp_entity)
+            if s and s.state not in ("unavailable", "unknown", ""):
+                try:
+                    current_temp = float(s.state)
+                except (ValueError, TypeError):
+                    pass
+        if current_temp is None:
+            ct = climate_state.attributes.get("current_temperature")
+            if ct is not None:
+                try:
+                    current_temp = float(ct)
+                except (ValueError, TypeError):
+                    pass
+
+        return serializer.build_hvac_ac_state_payload(
+            device_id, is_on, target_temp, work_mode, current_temp
+        )
 
     return None

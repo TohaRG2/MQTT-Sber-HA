@@ -187,11 +187,12 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
   scenario_button: ['Тип устройства','Источник в HA','Параметры'],
+  hvac_ac:         ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -303,7 +304,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -314,7 +315,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();}
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);}
     renderWiz();
   }else{
     await submitDevice();
@@ -333,6 +334,7 @@ async function wizValidate(){
     // Шаг 2 — выбор сущности (только если не последний шаг)
     if(wType==='relay'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='scenario_button'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
+    if(wType==='hvac_ac'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
 
@@ -365,7 +367,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -374,6 +376,7 @@ function renderStep1(){
     {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light, media_player'},
     {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'sensor: temperature, humidity, battery, signal'},
     {id:'scenario_button',icon:'🔔',name:'Сценарная кнопка',desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
+    {id:'hvac_ac',icon:'❄️',name:'Кондиционер',desc:'climate: управление температурой и режимами через Салют'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
     <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
@@ -468,7 +471,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='scenario_button'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -485,6 +488,10 @@ async function submitDevice(){
   const attrs={};
   if(wType==='relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
   else if(wType==='scenario_button'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
+  else if(wType==='hvac_ac'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.temperature_entity)attrs.temperature_entity=wData.temperature_entity;
+  }
   else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
   const btn=document.getElementById('btnNext');btn.disabled=true;btn.innerHTML='<div class="spin"></div>';
@@ -504,6 +511,66 @@ async function submitDevice(){
 
 async function fetchRelay(){if(haRelay.length)return;try{haRelay=(await api('/api/sber_mqtt/ha_entities/relay')).entities||[];}catch(e){toast('Ошибка загрузки сущностей','err');}}
 async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,battery,signal_strength')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
+
+let haClimate=[];
+async function fetchClimate(){if(haClimate.length)return;try{haClimate=(await api('/api/sber_mqtt/ha_entities/climate')).entities||[];}catch(e){toast('Ошибка загрузки климата','err');}}
+
+function renderStep2HvacAc(){
+  const sel=wData.entity_id;
+  const tempSel=wData.temperature_entity;
+  const tempEntity=tempSel?haSensors.find(x=>x.entity_id===tempSel):null;
+  const climateList=haClimate.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите климатическую сущность (climate):</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('hvaclist').innerHTML=hvacItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('hvaclist').innerHTML=hvacItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="hvaclist">${hvacItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    <div style="margin-top:18px">
+      <div class="sf"><label>🌡 Датчик текущей температуры <span style="color:var(--muted);font-weight:400">(опционально)</span></label>
+        <button class="sf-btn ${tempSel?'filled':''}" onclick="openHvacTempPicker()">
+          <span>${tempSel?(tempEntity?.friendly_name||tempSel):'Выбрать сенсор…'}</span><span>${tempSel?'✓':'▾'}</span>
+        </button>
+        ${tempSel?`<div class="sf-sub">${esc(tempSel)} <button class="sf-clr" onclick="clearHvacTemp()">✕</button></div>`:''}
+        <div class="hint">Если не указан — используется встроенный датчик кондиционера (current_temperature из атрибутов).</div>
+      </div>
+    </div>
+    <div id="hvacTempPicker" style="display:none;margin-top:10px">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="hvacTempInput" type="text" placeholder="Поиск…" oninput="renderHvacTempList(this.value)"/>
+          <button class="clr" onclick="hvacTempInput.value='';renderHvacTempList('')">✕</button>
+        </div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" id="hvacTempList"></div>
+      </div>
+    </div>`;
+}
+function hvacItems(){
+  const list=haClimate.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickHvacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">climate</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickHvacEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
+function openHvacTempPicker(){const el=document.getElementById('hvacTempPicker');el.style.display='';document.getElementById('hvacTempInput').value='';renderHvacTempList('');el.scrollIntoView({behavior:'smooth'});}
+function renderHvacTempList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class==='temperature');
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('hvacTempList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.temperature_entity===s.entity_id?'sel':''}" onclick="pickHvacTemp('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков температуры</div>`;
+}
+function pickHvacTemp(eid,name){wData.temperature_entity=eid;wData.temperature_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
+function clearHvacTemp(){delete wData.temperature_entity;delete wData.temperature_entity_name;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function slugify(t){const m={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'j',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',' ':'_'};return t.toLowerCase().split('').map(c=>m[c]!==undefined?m[c]:(/[a-z0-9]/.test(c)?c:'_')).join('').replace(/_+/g,'_').replace(/^_|_$/g,'')||'device';}
