@@ -20,7 +20,17 @@ from typing import Any, Callable
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.event import async_track_state_change_event
 
-from .const import DEVICE_TYPE_RELAY, DEVICE_TYPE_SENSOR_TEMP, RELAY_STATEFUL_DOMAINS, RELAY_BUTTON_DOMAINS
+from .const import (
+    DEVICE_TYPE_RELAY,
+    DEVICE_TYPE_SENSOR_TEMP,
+    DEVICE_TYPE_SCENARIO_BUTTON,
+    RELAY_STATEFUL_DOMAINS,
+    RELAY_BUTTON_DOMAINS,
+    SCENARIO_BUTTON_STATEFUL_DOMAINS,
+    SCENARIO_BUTTON_PUSH_DOMAINS,
+    SCENARIO_BUTTON_CLICK,
+    SCENARIO_BUTTON_DOUBLE_CLICK,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -85,6 +95,15 @@ class StateTracker:
                     eid = attrs.get(key)
                     if eid:
                         watched.add(eid)
+
+            elif device_type == DEVICE_TYPE_SCENARIO_BUTTON:
+                entity_id = attrs.get("entity_id", "")
+                domain    = entity_id.split(".")[0] if entity_id else ""
+                # Кнопки/сценарии отслеживаем через их специфическое состояние
+                # Для доменов со статусом (switch, light и т.д.) — следим за on/off
+                # Для push-доменов (button, input_button, script) — следим за last_triggered/state
+                if entity_id:
+                    watched.add(entity_id)
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -165,8 +184,40 @@ class StateTracker:
                 self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
             )
 
+        elif device_type == DEVICE_TYPE_SCENARIO_BUTTON:
+            bound_entity = attrs.get("entity_id", "")
+            if bound_entity != changed_entity_id:
+                return
+
+            domain = changed_entity_id.split(".")[0]
+
+            if domain in SCENARIO_BUTTON_PUSH_DOMAINS:
+                # Кнопки и сценарии: любое срабатывание → click
+                event = SCENARIO_BUTTON_CLICK
+            elif domain in SCENARIO_BUTTON_STATEFUL_DOMAINS:
+                # Статусные домены: включение → click, выключение → double_click
+                if domain == "media_player":
+                    is_on = new_state.state != "off"
+                else:
+                    is_on = new_state.state == "on"
+                event = SCENARIO_BUTTON_CLICK if is_on else SCENARIO_BUTTON_DOUBLE_CLICK
+            else:
+                return
+
+            _LOGGER.debug(
+                "ScenarioButton %s: отправляем событие '%s' (entity=%s state=%s)",
+                device_id, event, changed_entity_id, new_state.state,
+            )
+
+            payload = self._serializer.build_scenario_button_event_payload(device_id, event)
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
         elif device_type == DEVICE_TYPE_SENSOR_TEMP:
-            # Проверяем что изменившаяся сущность принадлежит этому датчику
             sensor_entities = {
                 attrs.get("temperature_entity"),
                 attrs.get("humidity_entity"),

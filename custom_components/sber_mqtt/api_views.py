@@ -32,6 +32,7 @@ from .const import (
     DOMAIN,
     DEVICE_TYPE_RELAY,
     DEVICE_TYPE_SENSOR_TEMP,
+    DEVICE_TYPE_SCENARIO_BUTTON,
     SUPPORTED_DEVICE_TYPES,
 )
 from .ha_helpers import get_entities_for_relay, get_sensor_entities
@@ -150,6 +151,11 @@ class SberDevicesView(HomeAssistantView):
                     {"error": "At least one of temperature_entity or humidity_entity must be specified"},
                     status=400,
                 )
+        elif device_type == DEVICE_TYPE_SCENARIO_BUTTON:
+            if not attrs.get("entity_id"):
+                return web.json_response(
+                    {"error": "attributes.entity_id is required for scenario_button"}, status=400
+                )
 
         # Формируем запись устройства
         device_entry = {
@@ -172,6 +178,17 @@ class SberDevicesView(HomeAssistantView):
         )
         _LOGGER.info("Config payload after add: %s", config_payload)
         mqtt_client.publish_config(config_payload)
+
+        # Публикуем начальное состояние нового устройства и сохраняем в last_state
+        from .__init__ import _build_current_state_payload
+        import json as _json
+        status_payload = _build_current_state_payload(hass, device_id, device_entry, serializer)
+        if status_payload:
+            mqtt_client.publish_status(status_payload)
+            last = _json.loads(status_payload)["devices"][device_id]
+            await registry.async_update_last_state(device_id, last)
+            device_entry["last_state"] = last
+            _LOGGER.info("Initial status published for %s: %s", device_id, status_payload)
 
         return web.json_response({"ok": True, "device": device_entry}, status=201)
 

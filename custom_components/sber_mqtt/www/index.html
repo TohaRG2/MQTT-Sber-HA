@@ -187,10 +187,11 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка' };
 const STEPS = {
-  relay:      ['Тип устройства','Источник в HA','Параметры'],
-  sensor_temp:['Тип устройства','Датчики в HA','Параметры'],
+  relay:           ['Тип устройства','Источник в HA','Параметры'],
+  sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
+  scenario_button: ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -313,7 +314,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();}
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();}
     renderWiz();
   }else{
     await submitDevice();
@@ -331,6 +332,7 @@ async function wizValidate(){
   } else if(wStep===2&&!isLast){
     // Шаг 2 — выбор сущности (только если не последний шаг)
     if(wType==='relay'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
+    if(wType==='scenario_button'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
 
@@ -363,7 +365,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -371,6 +373,7 @@ function renderStep1(){
   return [
     {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light, media_player'},
     {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'sensor: temperature, humidity, battery, signal'},
+    {id:'scenario_button',icon:'🔔',name:'Сценарная кнопка',desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
     <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
@@ -398,6 +401,29 @@ function relayItems(){
     <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Relay();}
+
+function renderStep2ScenarioButton(){
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label>
+    <div style="font-size:11px;color:var(--muted);margin-top:3px">Включение → <b>click</b> · Выключение → <b>double_click</b> · Кнопка/сценарий → <b>click</b></div></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('sblist').innerHTML=scenarioBtnItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('sblist').innerHTML=scenarioBtnItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="sblist">${scenarioBtnItems()}</div>
+    </div>
+    ${wData.entity_id?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(wData.entity_id)}</b></div>`:''}`;
+}
+function scenarioBtnItems(){
+  const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickScenarioBtnEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickScenarioBtnEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2ScenarioButton();}
 
 const SENSOR_SLOTS=[
   {key:'temperature_entity',label:'🌡 Температура',cls:'temperature',req:true},
@@ -442,7 +468,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='scenario_button'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -458,10 +484,21 @@ function autoId(){const n=document.getElementById('dName')?.value||'';const f=do
 async function submitDevice(){
   const attrs={};
   if(wType==='relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
+  else if(wType==='scenario_button'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
   else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
   const btn=document.getElementById('btnNext');btn.disabled=true;btn.innerHTML='<div class="spin"></div>';
-  try{await api('/api/sber_mqtt/devices',{method:'POST',body:JSON.stringify(body)});closeWizard();toast('Устройство добавлено','ok');await loadDevices();}
+  try{
+    const res = await api('/api/sber_mqtt/devices',{method:'POST',body:JSON.stringify(body)});
+    closeWizard();
+    toast('Устройство добавлено','ok');
+    await loadDevices();
+    // Применяем last_state из ответа — он уже содержит начальное состояние
+    if(res.device?.last_state && Object.keys(res.device.last_state).length){
+      const d=devices.find(x=>x.id===res.device.id);
+      if(d){d.last_state=res.device.last_state;renderTable();}
+    }
+  }
   catch(e){toast('Ошибка: '+e.message,'err');btn.disabled=false;btn.textContent='Готово ✓';}
 }
 

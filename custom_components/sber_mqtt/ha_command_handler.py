@@ -40,6 +40,9 @@ class HACommandHandler:
         elif device_type == "sensor_temp":
             # Датчики не управляются командами — игнорируем
             _LOGGER.debug("Команда для датчика %s проигнорирована", device.get("id"))
+        elif device_type == "scenario_button":
+            # Сценарные кнопки только отправляют события в Сбер, команды не принимают
+            _LOGGER.debug("Команда для сценарной кнопки %s проигнорирована", device.get("id"))
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",

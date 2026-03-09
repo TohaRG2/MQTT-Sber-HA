@@ -30,13 +30,15 @@ TOPIC_DOWN_ERRORS         = "sberdevices/v1/{login}/down/errors"               #
 
 # ── Типы устройств ────────────────────────────────────────────────────────
 # Используются как значение поля device_type при сохранении устройства
-DEVICE_TYPE_RELAY       = "relay"        # Реле: выключатели, кнопки, лампы, сценарии
-DEVICE_TYPE_SENSOR_TEMP = "sensor_temp"  # Датчик температуры/влажности
+DEVICE_TYPE_RELAY           = "relay"            # Реле: выключатели, кнопки, лампы, сценарии
+DEVICE_TYPE_SENSOR_TEMP     = "sensor_temp"      # Датчик температуры/влажности
+DEVICE_TYPE_SCENARIO_BUTTON = "scenario_button"  # Сценарная кнопка: прокидывает события из HA в Сбер
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
-    DEVICE_TYPE_RELAY:       "Реле",
-    DEVICE_TYPE_SENSOR_TEMP: "Датчик температуры/влажности",
+    DEVICE_TYPE_RELAY:           "Реле",
+    DEVICE_TYPE_SENSOR_TEMP:     "Датчик температуры/влажности",
+    DEVICE_TYPE_SCENARIO_BUTTON: "Сценарная кнопка",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
@@ -50,6 +52,20 @@ RELAY_BUTTON_DOMAINS = {"script", "button", "input_button"}
 # Домены у которых есть состояние on/off (отслеживаем через state_tracker)
 # media_player: состояние "off" → выключен, всё остальное (on/idle/playing/paused) → включён
 RELAY_STATEFUL_DOMAINS = {"switch", "input_boolean", "light", "media_player"}
+
+# ── Домены HA для типа "сценарная кнопка" ────────────────────────────────
+# Те же домены что и для реле — любая сущность с on/off или кнопка
+SCENARIO_BUTTON_DOMAINS = {"switch", "input_boolean", "script", "button", "input_button", "light", "media_player"}
+
+# Домены без состояния (button/script) — всегда шлём click при срабатывании
+SCENARIO_BUTTON_PUSH_DOMAINS = {"script", "button", "input_button"}
+
+# Домены со состоянием — включение → click, выключение → double_click
+SCENARIO_BUTTON_STATEFUL_DOMAINS = {"switch", "input_boolean", "light", "media_player"}
+
+# Значения событий сценарной кнопки (button_event) для Сбера
+SCENARIO_BUTTON_CLICK        = "click"         # Однократное нажатие (включение или кнопка)
+SCENARIO_BUTTON_DOUBLE_CLICK = "double_click"  # Двойное нажатие (выключение)
 
 # ── Хранилище ─────────────────────────────────────────────────────────────
 STORAGE_KEY     = "sber_mqtt_devices"  # Ключ в .storage/

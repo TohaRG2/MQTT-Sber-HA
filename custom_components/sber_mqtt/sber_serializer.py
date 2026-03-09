@@ -61,6 +61,7 @@ from typing import Any
 from .const import (
     DEVICE_TYPE_RELAY,
     DEVICE_TYPE_SENSOR_TEMP,
+    DEVICE_TYPE_SCENARIO_BUTTON,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
 )
@@ -116,6 +117,8 @@ class SberSerializer:
             return self._relay_config(device_id, device)
         if device_type == DEVICE_TYPE_SENSOR_TEMP:
             return self._sensor_temp_config(device_id, device)
+        if device_type == DEVICE_TYPE_SCENARIO_BUTTON:
+            return self._scenario_button_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -177,6 +180,38 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _scenario_button_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для сценарной кнопки.
+
+        Поддерживает события button_event: click (включение / нажатие кнопки)
+        и double_click (выключение). Долгое нажатие не используется.
+        """
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_scenario_button",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_scenario_button",
+                "category": DEVICE_TYPE_SCENARIO_BUTTON,
+                "features": ["online", "button_event"],
+                "allowed_values": {
+                    "button_event": {
+                        "type": "ENUM",
+                        "enum_values": {
+                            "values": ["click", "double_click"],
+                        },
+                    }
+                },
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
     # ── Payload состояния ──────────────────────────────────────────────────
 
     def build_root_state_payload(self) -> str:
@@ -200,6 +235,25 @@ class SberSerializer:
                     "states": [
                         {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
                         {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+                    ]
+                }
+            }
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
+    def build_scenario_button_event_payload(self, device_id: str, event: str) -> str:
+        """Событие сценарной кнопки: онлайн + тип нажатия.
+
+        event — одно из: "click", "double_click"
+        Сначала отправляем событие нажатия, затем Сбер сам обрабатывает его
+        как триггер для пользовательских сценариев в Салюте.
+        """
+        payload = {
+            "devices": {
+                device_id: {
+                    "states": [
+                        {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+                        {"key": "button_event", "value": {"type": "ENUM", "enum_value": event}},
                     ]
                 }
             }
