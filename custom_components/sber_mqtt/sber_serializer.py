@@ -63,6 +63,7 @@ from .const import (
     DEVICE_TYPE_SENSOR_TEMP,
     DEVICE_TYPE_SCENARIO_BUTTON,
     DEVICE_TYPE_HVAC_AC,
+    DEVICE_TYPE_VACUUM,
     HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
@@ -123,6 +124,8 @@ class SberSerializer:
             return self._scenario_button_config(device_id, device)
         if device_type == DEVICE_TYPE_HVAC_AC:
             return self._hvac_ac_config(device_id, device)
+        if device_type == DEVICE_TYPE_VACUUM:
+            return self._vacuum_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -245,6 +248,35 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _vacuum_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для пылесоса (vacuum_cleaner).
+
+        Обязательные функции: online.
+        Рабочие: vacuum_cleaner_command, vacuum_cleaner_status, battery_percentage.
+        """
+        attrs = device.get("attributes", {})
+        features = ["online", "vacuum_cleaner_command", "vacuum_cleaner_status"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_vacuum_cleaner",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_vacuum_cleaner",
+                "category": DEVICE_TYPE_VACUUM,
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
     # ── Payload состояния ──────────────────────────────────────────────────
 
     def build_root_state_payload(self) -> str:
@@ -338,6 +370,31 @@ class SberSerializer:
             except (ValueError, TypeError):
                 pass
 
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_vacuum_state_payload(
+        self,
+        device_id: str,
+        status: str,
+        battery: float | None = None,
+    ) -> str:
+        """Состояние пылесоса.
+
+        status  — статус в терминах Сбера: cleaning / docked / pause / returning_to_dock
+        battery — заряд батареи 0–100 (опционально)
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "vacuum_cleaner_status", "value": {"type": "ENUM", "enum_value": status}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_sensor_temp_state_payload(

@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -172,6 +172,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesRelayView,
         SberHASensorsView,
         SberHAEntitiesClimateView,
+        SberHAEntitiesVacuumView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -183,6 +184,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesRelayView(hass))
     hass.http.register_view(SberHASensorsView(hass))
     hass.http.register_view(SberHAEntitiesClimateView(hass))
+    hass.http.register_view(SberHAEntitiesVacuumView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -204,10 +206,11 @@ async def _async_register_panel(hass: HomeAssistant) -> None:
     from homeassistant.components import frontend
 
     # Удаляем старую панель если уже зарегистрирована
-    try:
-        frontend.async_remove_panel(hass, "sber_mqtt_panel")
-    except Exception:
-        pass
+    if "sber_mqtt_panel" in hass.data.get("frontend_panels", {}):
+        try:
+            frontend.async_remove_panel(hass, "sber_mqtt_panel")
+        except Exception:
+            pass
 
     frontend.async_register_built_in_panel(
         hass,
@@ -389,5 +392,33 @@ def _build_current_state_payload(
         return serializer.build_hvac_ac_state_payload(
             device_id, is_on, target_temp, work_mode, current_temp
         )
+
+    if device_type == "vacuum_cleaner":
+        entity_id = attrs.get("entity_id", "")
+        vacuum_state = hass.states.get(entity_id)
+        if not vacuum_state:
+            return None
+
+        sber_status = HA_VACUUM_STATUS_TO_SBER.get(vacuum_state.state, "docked")
+
+        # Заряд батареи — из внешнего датчика или из атрибутов vacuum
+        battery = None
+        battery_entity = attrs.get("battery_entity", "")
+        if battery_entity:
+            s = hass.states.get(battery_entity)
+            if s and s.state not in ("unavailable", "unknown", ""):
+                try:
+                    battery = float(s.state)
+                except (ValueError, TypeError):
+                    pass
+        if battery is None:
+            bl = vacuum_state.attributes.get("battery_level")
+            if bl is not None:
+                try:
+                    battery = float(bl)
+                except (ValueError, TypeError):
+                    pass
+
+        return serializer.build_vacuum_state_payload(device_id, sber_status, battery)
 
     return None

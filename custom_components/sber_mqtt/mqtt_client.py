@@ -86,6 +86,7 @@ class SberMQTTClient:
 
     def connect(self) -> bool:
         """Подключается к брокеру Сбера. Блокирующий метод — вызывать через executor."""
+        import threading
         try:
             client = mqtt.Client()
             client.username_pw_set(self._login, self._password)
@@ -110,6 +111,17 @@ class SberMQTTClient:
                 self._handle_change_group,
             )
 
+            # Event для ожидания подтверждения подключения от on_connect
+            connect_event = threading.Event()
+            connect_result: list[int] = []
+
+            original_on_connect = self._on_connect
+            def _on_connect_with_event(c, userdata, flags, rc):
+                connect_result.append(rc)
+                connect_event.set()
+                original_on_connect(c, userdata, flags, rc)
+            client.on_connect = _on_connect_with_event
+
             client.connect(self._broker, self._port, keepalive=60)
             client.loop_start()  # запускает фоновый поток обработки MQTT
             self._client = client
@@ -118,7 +130,19 @@ class SberMQTTClient:
                 "Sber MQTT: подключение к %s:%s как %s",
                 self._broker, self._port, self._login,
             )
-            return True
+
+            # Ждём подтверждения подключения (on_connect) максимум 10 секунд
+            connected = connect_event.wait(timeout=10)
+            if connected and connect_result and connect_result[0] == 0:
+                _LOGGER.info("Sber MQTT: соединение подтверждено брокером")
+                return True
+            elif connected and connect_result:
+                _LOGGER.error("Sber MQTT: брокер отклонил подключение, rc=%s", connect_result[0])
+                return False
+            else:
+                _LOGGER.error("Sber MQTT: таймаут ожидания подключения (10с)")
+                return False
+
         except Exception as exc:
             _LOGGER.error("Sber MQTT: ошибка подключения: %s", exc)
             return False

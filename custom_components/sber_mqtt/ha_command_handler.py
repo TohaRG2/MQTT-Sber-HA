@@ -45,6 +45,8 @@ class HACommandHandler:
             _LOGGER.debug("Команда для сценарной кнопки %s проигнорирована", device.get("id"))
         elif device_type == "hvac_ac":
             await self._handle_hvac_ac_command(device, states)
+        elif device_type == "vacuum_cleaner":
+            await self._handle_vacuum_command(device, states)
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -192,3 +194,44 @@ class HACommandHandler:
                     _LOGGER.warning(
                         "HVAC %s: неизвестный режим Сбера '%s'", device.get("id"), sber_mode
                     )
+
+    async def _handle_vacuum_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления пылесосом от Сбера.
+
+        Поддерживаемые команды (vacuum_cleaner_command):
+          start          → vacuum.start
+          resume         → vacuum.start
+          pause          → vacuum.pause
+          return_to_dock → vacuum.return_to_base
+        """
+        from .const import SBER_VACUUM_COMMAND_TO_HA
+
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+
+        if not entity_id:
+            _LOGGER.error("Пылесос %s: не задан entity_id", device.get("id"))
+            return
+
+        for state in states:
+            key = state.get("key")
+            if key != "vacuum_cleaner_command":
+                continue
+
+            sber_cmd = state.get("value", {}).get("enum_value", "")
+            ha_call  = SBER_VACUUM_COMMAND_TO_HA.get(sber_cmd)
+
+            if ha_call:
+                domain, service = ha_call
+                _LOGGER.info(
+                    "Пылесос %s: команда '%s' → %s.%s",
+                    device.get("id"), sber_cmd, domain, service,
+                )
+                await self._hass.services.async_call(
+                    domain, service, {"entity_id": entity_id}, blocking=False
+                )
+            else:
+                _LOGGER.warning(
+                    "Пылесос %s: неизвестная команда '%s'",
+                    device.get("id"), sber_cmd,
+                )

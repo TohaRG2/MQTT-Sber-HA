@@ -16,7 +16,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .conn-badge{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);background:var(--bg);padding:4px 10px;border-radius:20px;border:1px solid var(--border)}
 .dot{width:7px;height:7px;border-radius:50%;background:#9e9e9e;transition:background .3s}
 .dot.ok{background:var(--primary)}.dot.err{background:var(--danger)}
-.main{max-width:1120px;margin:0 auto;padding:20px 16px}
+.main{max-width:1400px;margin:0 auto;padding:20px 16px}
 .toolbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;gap:10px;flex-wrap:wrap}
 .toolbar-l{font-size:14px;color:var(--muted)}
 .btn{display:inline-flex;align-items:center;gap:5px;padding:8px 16px;border-radius:8px;border:none;cursor:pointer;font-size:13px;font-weight:500;transition:all .15s;line-height:1.4}
@@ -25,15 +25,22 @@ body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;backgrou
 .btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{background:#b71c1c}
 .btn-sm{padding:4px 10px;font-size:12px}.btn:disabled{opacity:.5;cursor:not-allowed}
 .tbl-wrap{background:var(--card);border-radius:var(--radius);border:1px solid var(--border);overflow:hidden;box-shadow:var(--shadow)}
-table{width:100%;border-collapse:collapse}
-th{background:var(--bg);padding:9px 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;user-select:none;text-align:left}
+table{width:100%;border-collapse:collapse;table-layout:fixed}
+th{background:var(--bg);padding:9px 14px;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted);border-bottom:1px solid var(--border);cursor:pointer;white-space:nowrap;user-select:none;text-align:left;overflow:hidden;text-overflow:ellipsis}
 th:hover{color:var(--primary)}th.sorted{color:var(--primary)}
-td{padding:10px 14px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:top}
+td{padding:10px 14px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:top;overflow:hidden}
+th:nth-child(1),td:nth-child(1){width:14%}
+th:nth-child(2),td:nth-child(2){width:14%}
+th:nth-child(3),td:nth-child(3){width:9%}
+th:nth-child(4),td:nth-child(4){width:12%}
+th:nth-child(5),td:nth-child(5){width:28%}
+th:nth-child(6),td:nth-child(6){width:18%}
+th:nth-child(7),td:nth-child(7){width:5%;text-align:center}
 tr:last-child td{border-bottom:none}tr:hover td{background:#fafafa}
 .id-cell{font-family:monospace;font-size:11px;color:var(--muted)}
 .type-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary-lt);color:var(--primary-dk);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
-.attrs{font-size:11px;color:var(--muted);line-height:1.7}
-.state-cell{font-size:10px;font-family:monospace;background:#f6f8fa;border:1px solid var(--border);border-radius:4px;padding:3px 6px;max-width:180px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;display:block}
+.attrs{font-size:11px;color:var(--muted);line-height:1.7;word-break:break-all}
+.state-cell{font-size:10px;font-family:monospace;background:#f6f8fa;border:1px solid var(--border);border-radius:4px;padding:3px 6px;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;display:inline-block}
 .state-cell:hover{white-space:normal;word-break:break-all;max-width:none}
 .empty{text-align:center;padding:56px 20px;color:var(--muted)}
 .empty .ei{font-size:44px;margin-bottom:14px}.empty h3{font-size:17px;margin-bottom:6px;color:var(--text)}
@@ -127,7 +134,7 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
         <th onclick="sortBy('device_type')">Тип <span id="si-device_type"></span></th>
         <th>Атрибуты</th>
         <th>Последнее состояние</th>
-        <th></th>
+        <th class="del-col"></th>
       </tr></thead>
       <tbody id="tbody">
         <tr><td colspan="7"><div class="loading"><div class="spin" style="border-color:#ddd3;border-top-color:var(--primary)"></div></div></td></tr>
@@ -187,12 +194,13 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
   scenario_button: ['Тип устройства','Источник в HA','Параметры'],
   hvac_ac:         ['Тип устройства','Источник в HA','Параметры'],
+  vacuum_cleaner:  ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -260,8 +268,8 @@ function renderTable() {
       <td>${esc(d.room||'—')}</td>
       <td><span class="type-badge">${esc(TYPE_LABELS[d.device_type]||d.device_type)}</span></td>
       <td class="attrs">${attrs||'—'}</td>
-      <td><span class="state-cell" title="${fmtState(d.last_state)}">${esc(fmtState(d.last_state))}</span></td>
-      <td><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
+      <td class="state-col"><span class="state-cell" title="${fmtState(d.last_state)}">${esc(fmtState(d.last_state))}</span></td>
+      <td class="del-col"><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
@@ -304,7 +312,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -315,7 +323,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);}
     renderWiz();
   }else{
     await submitDevice();
@@ -335,6 +343,7 @@ async function wizValidate(){
     if(wType==='relay'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='scenario_button'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='hvac_ac'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
+    if(wType==='vacuum_cleaner'&&!wData.entity_id){toast('Выберите пылесос','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
 
@@ -367,16 +376,17 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
 function renderStep1(){
   return [
-    {id:'relay',icon:'🔌',name:'Реле',desc:'switch, input_boolean, script, button, input_button, light, media_player'},
-    {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'sensor: temperature, humidity, battery, signal'},
+    {id:'relay',icon:'🔌',name:'Реле',desc:'Прокидывает switch, light, input_boolean, media_player, script, button, input_button в Салют — включение и выключение голосом'},
+    {id:'sensor_temp',icon:'🌡️',name:'Датчик температуры/влажности',desc:'Прокидывает датчики температуры и влажности в Салют — значения доступны в автоматизациях и через голосовые команды'},
     {id:'scenario_button',icon:'🔔',name:'Сценарная кнопка',desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
     {id:'hvac_ac',icon:'❄️',name:'Кондиционер',desc:'climate: управление температурой и режимами через Салют'},
+    {id:'vacuum_cleaner',icon:'🤖',name:'Пылесос',desc:'vacuum: управление уборкой голосом через Салют'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
     <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
@@ -471,7 +481,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -491,6 +501,10 @@ async function submitDevice(){
   else if(wType==='hvac_ac'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.temperature_entity)attrs.temperature_entity=wData.temperature_entity;
+  }
+  else if(wType==='vacuum_cleaner'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.battery_entity)attrs.battery_entity=wData.battery_entity;
   }
   else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
@@ -571,6 +585,92 @@ function renderHvacTempList(q){
 }
 function pickHvacTemp(eid,name){wData.temperature_entity=eid;wData.temperature_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
 function clearHvacTemp(){delete wData.temperature_entity;delete wData.temperature_entity_name;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
+
+// ── Пылесос ──────────────────────────────────────────────────────────────
+let haVacuum=[];
+async function fetchVacuum(){
+  if(haVacuum.length)return;
+  try{haVacuum=(await api('/api/sber_mqtt/ha_entities/vacuum')).entities||[];}
+  catch(e){toast('Ошибка загрузки пылесосов','err');}
+}
+
+function renderStep2Vacuum(){
+  const sel=wData.entity_id;
+  const batSel=wData.battery_entity;
+  // Ищем отображаемое имя выбранного батарейного сенсора
+  const batEntity=batSel?haSensors.find(x=>x.entity_id===batSel):null;
+  const vacList=haVacuum.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите пылесос (vacuum):</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('vaclist').innerHTML=vacItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('vaclist').innerHTML=vacItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="vaclist">${vacItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    <div style="margin-top:18px">
+      <div class="sf"><label>🔋 Датчик заряда батареи <span style="color:var(--muted);font-weight:400">(опционально)</span></label>
+        <button class="sf-btn ${batSel?'filled':''}" onclick="openVacBatteryPicker()">
+          <span>${batSel?(batEntity?.friendly_name||batSel):'Выбрать сенсор…'}</span><span>${batSel?'✓':'▾'}</span>
+        </button>
+        ${batSel?`<div class="sf-sub">${esc(batSel)} <button class="sf-clr" onclick="clearVacBattery()">✕</button></div>`:''}
+        <div class="hint">Автоматически подтянется датчик батареи того же устройства. Если не задан — используется атрибут battery_level пылесоса.</div>
+      </div>
+    </div>
+    <div id="vacBatteryPicker" style="display:none;margin-top:10px">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="vacBatInput" type="text" placeholder="Поиск…" oninput="renderVacBatList(this.value)"/>
+          <button class="clr" onclick="vacBatInput.value='';renderVacBatList('')">✕</button>
+        </div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" id="vacBatList"></div>
+      </div>
+    </div>`;
+}
+
+function vacItems(){
+  const list=haVacuum.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Нет пылесосов</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickVacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+    <span class="dom-badge">vacuum</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+
+function pickVacEntity(eid, name, area, deviceId){
+  wData.entity_id=eid; wData.entity_name=name; wData.entity_area=area;
+  // Автоматически ищем датчик батареи того же устройства HA
+  if(deviceId){
+    const batSensor=haSensors.find(s=>s.device_class==='battery' && s.device_id===deviceId);
+    if(batSensor){
+      wData.battery_entity=batSensor.entity_id;
+      wData.battery_entity_name=batSensor.friendly_name;
+    }
+  }
+  document.getElementById('wizContent').innerHTML=renderStep2Vacuum();
+}
+
+function openVacBatteryPicker(){
+  const el=document.getElementById('vacBatteryPicker');
+  el.style.display='';
+  document.getElementById('vacBatInput').value='';
+  renderVacBatList('');
+  el.scrollIntoView({behavior:'smooth'});
+}
+function renderVacBatList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class==='battery');
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('vacBatList'); if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''}" onclick="pickVacBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков батареи</div>`;
+}
+function pickVacBattery(eid,name){wData.battery_entity=eid;wData.battery_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2Vacuum();}
+function clearVacBattery(){delete wData.battery_entity;delete wData.battery_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Vacuum();}
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function slugify(t){const m={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'j',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',' ':'_'};return t.toLowerCase().split('').map(c=>m[c]!==undefined?m[c]:(/[a-z0-9]/.test(c)?c:'_')).join('').replace(/_+/g,'_').replace(/^_|_$/g,'')||'device';}

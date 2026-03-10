@@ -25,6 +25,7 @@ from .const import (
     DEVICE_TYPE_SENSOR_TEMP,
     DEVICE_TYPE_SCENARIO_BUTTON,
     DEVICE_TYPE_HVAC_AC,
+    DEVICE_TYPE_VACUUM,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -32,6 +33,7 @@ from .const import (
     SCENARIO_BUTTON_CLICK,
     SCENARIO_BUTTON_DOUBLE_CLICK,
     HA_HVAC_MODE_TO_SBER,
+    HA_VACUUM_STATUS_TO_SBER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,6 +117,15 @@ class StateTracker:
                 temp_entity = attrs.get("temperature_entity", "")
                 if temp_entity:
                     watched.add(temp_entity)
+
+            elif device_type == DEVICE_TYPE_VACUUM:
+                # Отслеживаем vacuum-сущность и опциональный датчик батареи
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                battery_entity = attrs.get("battery_entity", "")
+                if battery_entity:
+                    watched.add(battery_entity)
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -270,6 +281,50 @@ class StateTracker:
             payload = self._serializer.build_hvac_ac_state_payload(
                 device_id, is_on, target_temp, work_mode, current_temp
             )
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_VACUUM:
+            vacuum_entity  = attrs.get("entity_id", "")
+            battery_entity = attrs.get("battery_entity", "")
+            if changed_entity_id not in {vacuum_entity, battery_entity}:
+                return
+
+            # Читаем состояние vacuum-сущности
+            vacuum_state = self._hass.states.get(vacuum_entity)
+            if not vacuum_state:
+                return
+
+            ha_status   = vacuum_state.state
+            sber_status = HA_VACUUM_STATUS_TO_SBER.get(ha_status, "docked")
+
+            # Заряд батареи — из внешнего сенсора или из атрибутов vacuum
+            battery = None
+            if battery_entity:
+                s = self._hass.states.get(battery_entity)
+                if s and s.state not in ("unavailable", "unknown", ""):
+                    try:
+                        battery = float(s.state)
+                    except (ValueError, TypeError):
+                        pass
+            if battery is None:
+                bl = vacuum_state.attributes.get("battery_level")
+                if bl is not None:
+                    try:
+                        battery = float(bl)
+                    except (ValueError, TypeError):
+                        pass
+
+            _LOGGER.debug(
+                "Vacuum %s: status=%s→%s battery=%s",
+                device_id, ha_status, sber_status, battery,
+            )
+
+            payload = self._serializer.build_vacuum_state_payload(device_id, sber_status, battery)
             self._publish_status(payload)
 
             import json as _json
