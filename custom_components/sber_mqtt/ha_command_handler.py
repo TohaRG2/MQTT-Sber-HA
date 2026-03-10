@@ -49,6 +49,8 @@ class HACommandHandler:
             await self._handle_vacuum_command(device, states)
         elif device_type == "valve":
             await self._handle_valve_command(device, states)
+        elif device_type == "light":
+            await self._handle_light_command(device, states)
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -281,3 +283,108 @@ class HACommandHandler:
                     "Кран %s: команда '%s' не поддерживается для домена '%s'",
                     device.get("id"), sber_cmd, domain,
                 )
+
+    async def _handle_light_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления лампой от Сбера.
+
+        on_off          → light.turn_on / light.turn_off
+        light_brightness → light.turn_on(brightness=...)
+        light_colour     → light.turn_on(hs_color=...)
+        light_colour_temp → light.turn_on(color_temp=...)
+        light_mode       → light.turn_on(color_mode=...)
+        """
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+        if not entity_id:
+            _LOGGER.error("Лампа %s: не задан entity_id", device.get("id"))
+            return
+
+        service_data: dict = {"entity_id": entity_id}
+        service = "turn_on"
+
+        for state in states:
+            key = state.get("key")
+            val = state.get("value", {})
+
+            if key == "on_off":
+                # Сбер может прислать {"type": "BOOL"} без bool_value — это выключение
+                raw = val.get("bool_value")
+                if raw is None:
+                    is_on = False
+                elif isinstance(raw, bool):
+                    is_on = raw
+                elif isinstance(raw, str):
+                    is_on = raw.lower() in ("true", "1", "on")
+                else:
+                    is_on = bool(raw)
+                service = "turn_on" if is_on else "turn_off"
+
+            elif key == "light_brightness":
+                # Сбер 50–1000 → HA 0–255
+                try:
+                    from .const import LIGHT_BRIGHTNESS_MIN, LIGHT_BRIGHTNESS_MAX
+                    sber_b = int(val.get("integer_value", 500))
+                    ha_brightness = round(
+                        (sber_b - LIGHT_BRIGHTNESS_MIN)
+                        / (LIGHT_BRIGHTNESS_MAX - LIGHT_BRIGHTNESS_MIN)
+                        * 255
+                    )
+                    service_data["brightness"] = max(0, min(255, ha_brightness))
+                except (ValueError, TypeError):
+                    pass
+
+            elif key == "light_colour":
+                # Сбер HSV (h 0–360, s 0–1000, v 100–1000) → HA hs_color (h 0–360, s 0–100)
+                # Яркость берём из v, т.к. Сбер может не посылать отдельный light_brightness
+                try:
+                    from .const import LIGHT_BRIGHTNESS_MIN, LIGHT_BRIGHTNESS_MAX
+                    cv = val.get("colour_value", {})
+                    h  = float(cv.get("h", 0))
+                    s  = float(cv.get("s", 1000)) / 10.0  # 0–1000 → 0–100
+                    service_data["hs_color"] = (h, s)
+                    # v: 100–1000 → HA brightness 0–255
+                    v = cv.get("v")
+                    if v is not None:
+                        v_norm = (float(v) - 100) / 900.0   # 100–1000 → 0.0–1.0
+                        ha_brightness = round(max(0.0, min(1.0, v_norm)) * 255)
+                        service_data["brightness"] = ha_brightness
+                except (ValueError, TypeError):
+                    pass
+
+            elif key == "light_colour_temp":
+                # Сбер 0–1000 (промилле) → HA мирады
+                try:
+                    from homeassistant.helpers.entity_registry import async_get as er_get
+                    sber_ct = int(val.get("integer_value", 500))
+                    # Получаем диапазон мирад из атрибутов текущего состояния
+                    hass_state = self._hass.states.get(entity_id)
+                    if hass_state:
+                        mn = float(hass_state.attributes.get("min_mireds", 153))
+                        mx = float(hass_state.attributes.get("max_mireds", 500))
+                    else:
+                        mn, mx = 153.0, 500.0
+                    # 0 промилле = холодный (min_mireds), 1000 = тёплый (max_mireds)
+                    mireds = round(mn + (sber_ct / 1000.0) * (mx - mn))
+                    service_data["color_temp"] = max(int(mn), min(int(mx), mireds))
+                except (ValueError, TypeError):
+                    pass
+
+            elif key == "light_mode":
+                mode = val.get("enum_value", "white")
+                # При смене режима просто меняем color_mode
+                if mode == "colour":
+                    # Переключаем на hs, если нет цвета в service_data
+                    if "hs_color" not in service_data:
+                        service_data["color_mode"] = "hs"
+                else:
+                    # Белый режим — переключаем на color_temp или white
+                    if "color_temp" not in service_data:
+                        service_data["color_mode"] = "color_temp"
+
+        _LOGGER.info(
+            "Лампа %s: %s.%s %s",
+            device.get("id"), "light", service, service_data,
+        )
+        await self._hass.services.async_call(
+            "light", service, service_data, blocking=False
+        )

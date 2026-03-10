@@ -36,6 +36,7 @@ from .const import (
     DEVICE_TYPE_HVAC_AC,
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
+    DEVICE_TYPE_LIGHT,
     SUPPORTED_DEVICE_TYPES,
 )
 from .ha_helpers import get_entities_for_relay, get_sensor_entities
@@ -173,6 +174,11 @@ class SberDevicesView(HomeAssistantView):
             if not attrs.get("entity_id"):
                 return web.json_response(
                     {"error": "attributes.entity_id is required for valve"}, status=400
+                )
+        elif device_type == DEVICE_TYPE_LIGHT:
+            if not attrs.get("entity_id"):
+                return web.json_response(
+                    {"error": "attributes.entity_id is required for light"}, status=400
                 )
 
         # Формируем запись устройства
@@ -620,4 +626,77 @@ class SberHAEntitiesValveView(HomeAssistantView):
                 "area":          area_name,
             })
         result.sort(key=lambda x: (x["domain"], x["area"], x["friendly_name"]))
+        return web.json_response({"entities": result})
+
+
+# ── GET /api/sber_mqtt/ha_entities/light ──────────────────────────────────
+
+class SberHAEntitiesLightView(HomeAssistantView):
+    """Список light-сущностей HA для привязки к лампе.
+
+    Возвращает поддерживаемые фичи лампы на основе её атрибутов.
+    """
+
+    url  = "/api/sber_mqtt/ha_entities/light"
+    name = "api:sber_mqtt:ha_entities_light"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
+        hass: HomeAssistant = request.app["hass"]
+        entity_reg = er.async_get(hass)
+        area_reg   = ar.async_get(hass)
+        device_reg = dr.async_get(hass)
+        result = []
+        for entry in entity_reg.entities.values():
+            if entry.domain != "light":
+                continue
+            if entry.disabled_by:
+                continue
+            state = hass.states.get(entry.entity_id)
+            friendly_name = (
+                state.attributes.get("friendly_name", entry.entity_id) if state
+                else (entry.name or entry.entity_id)
+            )
+            area_name = ""
+            if entry.area_id:
+                area = area_reg.async_get_area(entry.area_id)
+                if area:
+                    area_name = area.name
+            elif entry.device_id:
+                dev = device_reg.async_get(entry.device_id)
+                if dev and dev.area_id:
+                    area = area_reg.async_get_area(dev.area_id)
+                    if area:
+                        area_name = area.name
+
+            # Определяем поддерживаемые фичи из атрибутов и supported_color_modes
+            supported_features: list[str] = []
+            if state:
+                a = state.attributes
+                scm = set(a.get("supported_color_modes") or [])
+                # Яркость: поддерживается если есть хоть один mode кроме onoff
+                if scm - {"onoff"}:
+                    supported_features.append("light_brightness")
+                # Цветовая температура
+                if "color_temp" in scm:
+                    supported_features.append("light_colour_temp")
+                # Цвет
+                if scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}:
+                    supported_features.append("light_colour")
+                # Режим: только если поддерживаются и цвет и белый одновременно
+                if (scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}) and ("color_temp" in scm or "white" in scm):
+                    supported_features.append("light_mode")
+
+            result.append({
+                "entity_id":         entry.entity_id,
+                "domain":            "light",
+                "friendly_name":     friendly_name,
+                "area":              area_name,
+                "supported_features": supported_features,
+            })
+        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
         return web.json_response({"entities": result})

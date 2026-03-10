@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -174,6 +174,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesClimateView,
         SberHAEntitiesVacuumView,
         SberHAEntitiesValveView,
+        SberHAEntitiesLightView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -187,6 +188,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesClimateView(hass))
     hass.http.register_view(SberHAEntitiesVacuumView(hass))
     hass.http.register_view(SberHAEntitiesValveView(hass))
+    hass.http.register_view(SberHAEntitiesLightView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -441,5 +443,48 @@ def _build_current_state_payload(
             open_state = "close"
 
         return serializer.build_valve_state_payload(device_id, open_set, open_state)
+
+    if device_type == "light":
+        entity_id = attrs.get("entity_id", "")
+        light_state = hass.states.get(entity_id)
+        if not light_state:
+            return None
+
+        is_on = light_state.state == "on"
+        a = light_state.attributes
+
+        features = ["on_off"]
+        for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
+            if attrs.get(feat):
+                features.append(feat)
+
+        brightness_pct = None
+        if a.get("brightness") is not None:
+            try:
+                brightness_pct = float(a["brightness"]) / 255.0
+            except (ValueError, TypeError):
+                pass
+
+        hs_color = a.get("hs_color")
+        if hs_color is None and a.get("rgb_color") is not None:
+            try:
+                import colorsys
+                r, g, b = [x / 255.0 for x in a["rgb_color"][:3]]
+                h, s, _ = colorsys.rgb_to_hsv(r, g, b)
+                hs_color = (h * 360.0, s * 100.0)
+            except Exception:
+                pass
+
+        return serializer.build_light_state_payload(
+            device_id=device_id,
+            is_on=is_on,
+            features=features,
+            brightness_pct=brightness_pct,
+            hs_color=hs_color,
+            color_temp_mireds=a.get("color_temp"),
+            min_mireds=a.get("min_mireds"),
+            max_mireds=a.get("max_mireds"),
+            color_mode=a.get("color_mode"),
+        )
 
     return None

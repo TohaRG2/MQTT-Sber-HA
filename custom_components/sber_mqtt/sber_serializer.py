@@ -65,9 +65,15 @@ from .const import (
     DEVICE_TYPE_HVAC_AC,
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
+    DEVICE_TYPE_LIGHT,
     HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
+    LIGHT_BRIGHTNESS_MIN,
+    LIGHT_BRIGHTNESS_MAX,
+    LIGHT_COLOUR_TEMP_MIN,
+    LIGHT_COLOUR_TEMP_MAX,
+    HA_COLOR_MODE_TO_SBER_LIGHT_MODE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -129,6 +135,8 @@ class SberSerializer:
             return self._vacuum_config(device_id, device)
         if device_type == DEVICE_TYPE_VALVE:
             return self._valve_config(device_id, device)
+        if device_type == DEVICE_TYPE_LIGHT:
+            return self._light_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -304,6 +312,63 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _light_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для лампы (light).
+
+        Обязательные функции: online, on_off.
+        Опциональные (задаются пользователем при добавлении):
+          light_brightness, light_colour, light_colour_temp, light_mode.
+        """
+        attrs = device.get("attributes", {})
+        features = ["online", "on_off"]
+
+        # Добавляем опциональные фичи, выбранные пользователем
+        for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
+            if attrs.get(feat):
+                features.append(feat)
+
+        allowed_values: dict = {}
+        if "light_brightness" in features:
+            allowed_values["light_brightness"] = {
+                "type": "INTEGER",
+                "integer_values": {
+                    "min": str(LIGHT_BRIGHTNESS_MIN),
+                    "max": str(LIGHT_BRIGHTNESS_MAX),
+                    "step": "1",
+                },
+            }
+        if "light_colour_temp" in features:
+            allowed_values["light_colour_temp"] = {
+                "type": "INTEGER",
+                "integer_values": {
+                    "min": str(LIGHT_COLOUR_TEMP_MIN),
+                    "max": str(LIGHT_COLOUR_TEMP_MAX),
+                    "step": "1",
+                },
+            }
+
+        model: dict = {
+            "id": "ID_light",
+            "manufacturer": MANUFACTURER,
+            "model": "Model_light",
+            "category": DEVICE_TYPE_LIGHT,
+            "features": features,
+        }
+        if allowed_values:
+            model["allowed_values"] = allowed_values
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": model,
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
     # ── Payload состояния ──────────────────────────────────────────────────
 
     def build_root_state_payload(self) -> str:
@@ -440,6 +505,98 @@ class SberSerializer:
             {"key": "open_set",   "value": {"type": "ENUM", "enum_value": open_set}},
             {"key": "open_state", "value": {"type": "ENUM", "enum_value": open_state}},
         ]
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_light_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        features: list[str],
+        brightness_pct: float | None = None,
+        hs_color: tuple | None = None,
+        color_temp_mireds: float | None = None,
+        min_mireds: float | None = None,
+        max_mireds: float | None = None,
+        color_mode: str | None = None,
+    ) -> str:
+        """Состояние лампы.
+
+        brightness_pct    — яркость 0.0–1.0 (из HA brightness / 255)
+        hs_color          — (hue 0–360, sat 0–100) из HA
+        color_temp_mireds — цветовая температура в мирадах
+        min_mireds        — минимальные мирады лампы (самый холодный)
+        max_mireds        — максимальные мирады лампы (самый тёплый)
+        color_mode        — текущий color_mode из HA
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+
+        if not is_on:
+            return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+        # Яркость: HA 0–255 → Сбер 50–1000
+        if "light_brightness" in features and brightness_pct is not None:
+            try:
+                sber_brightness = round(
+                    LIGHT_BRIGHTNESS_MIN
+                    + float(brightness_pct) * (LIGHT_BRIGHTNESS_MAX - LIGHT_BRIGHTNESS_MIN)
+                )
+                sber_brightness = max(LIGHT_BRIGHTNESS_MIN, min(LIGHT_BRIGHTNESS_MAX, sber_brightness))
+                states.append({
+                    "key": "light_brightness",
+                    "value": {"type": "INTEGER", "integer_value": sber_brightness},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        # Цветовая температура: мирады → промилле 0–1000
+        # min_mireds = холодный (→ 1000 в Сбере), max_mireds = тёплый (→ 0 в Сбере)
+        if "light_colour_temp" in features and color_temp_mireds is not None:
+            try:
+                mn = float(min_mireds or 153)
+                mx = float(max_mireds or 500)
+                ct = float(color_temp_mireds)
+                if mx > mn:
+                    # Нормализуем: 0 = холодный (min_mireds), 1000 = тёплый (max_mireds)
+                    sber_ct = round((ct - mn) / (mx - mn) * LIGHT_COLOUR_TEMP_MAX)
+                    sber_ct = max(LIGHT_COLOUR_TEMP_MIN, min(LIGHT_COLOUR_TEMP_MAX, sber_ct))
+                else:
+                    sber_ct = 500
+                states.append({
+                    "key": "light_colour_temp",
+                    "value": {"type": "INTEGER", "integer_value": sber_ct},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        # Цвет: HA hs_color (h 0–360, s 0–100) → Сбер HSV (h 0–360, s 0–1000, v 100–1000)
+        if "light_colour" in features and hs_color is not None:
+            try:
+                h = float(hs_color[0])
+                s = round(float(hs_color[1]) * 10)  # 0–100 → 0–1000
+                # v берём из яркости, если есть, иначе максимум
+                if brightness_pct is not None:
+                    v = round(100 + float(brightness_pct) * 900)  # 100–1000
+                    v = max(100, min(1000, v))
+                else:
+                    v = 1000
+                states.append({
+                    "key": "light_colour",
+                    "value": {"type": "COLOUR", "colour_value": {"h": round(h), "s": s, "v": v}},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        # Режим: colour / white
+        if "light_mode" in features and color_mode is not None:
+            sber_mode = HA_COLOR_MODE_TO_SBER_LIGHT_MODE.get(color_mode, "white")
+            states.append({
+                "key": "light_mode",
+                "value": {"type": "ENUM", "enum_value": sber_mode},
+            })
+
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_sensor_temp_state_payload(

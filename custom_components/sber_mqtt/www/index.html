@@ -194,7 +194,7 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
@@ -202,6 +202,7 @@ const STEPS = {
   hvac_ac:         ['Тип устройства','Источник в HA','Параметры'],
   vacuum_cleaner:  ['Тип устройства','Источник в HA','Параметры'],
   valve:           ['Тип устройства','Источник в HA','Параметры'],
+  light:           ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -313,7 +314,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -324,7 +325,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();}
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();}
     renderWiz();
   }else{
     await submitDevice();
@@ -346,6 +347,7 @@ async function wizValidate(){
     if(wType==='hvac_ac'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
     if(wType==='vacuum_cleaner'&&!wData.entity_id){toast('Выберите пылесос','err');return false;}
     if(wType==='valve'&&!wData.entity_id){toast('Выберите сущность крана','err');return false;}
+    if(wType==='light'&&!wData.entity_id){toast('Выберите лампу','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
 
@@ -378,7 +380,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -390,6 +392,7 @@ function renderStep1(){
     {id:'hvac_ac',icon:'❄️',name:'Кондиционер',desc:'climate: управление температурой и режимами через Салют'},
     {id:'vacuum_cleaner',icon:'🤖',name:'Пылесос',desc:'vacuum: управление уборкой голосом через Салют'},
     {id:'valve',icon:'🚰',name:'Кран',desc:'valve, switch: открытие и закрытие голосом через Салют'},
+    {id:'light',icon:'💡',name:'Лампа',desc:'light: управление яркостью, цветом и температурой через Салют'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
     <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
@@ -484,7 +487,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -511,6 +514,13 @@ async function submitDevice(){
   }
   else if(wType==='valve'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+  }
+  else if(wType==='light'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    // Сохраняем выбранные фичи как булевые флаги
+    for(const f of ['light_brightness','light_colour','light_colour_temp','light_mode']){
+      attrs[f]=!!(wData.light_features&&wData.light_features.includes(f));
+    }
   }
   else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
@@ -710,6 +720,91 @@ function valveItems(){
     <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickValveEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Valve();}
+
+// ── Лампа ──────────────────────────────────────────────────────────────────
+let haLight=[];
+async function fetchLight(){
+  if(haLight.length)return;
+  try{haLight=(await api('/api/sber_mqtt/ha_entities/light')).entities||[];}
+  catch(e){toast('Ошибка загрузки ламп','err');}
+}
+
+// Человекочитаемые названия фич
+const LIGHT_FEATURE_LABELS = {
+  light_brightness:   '🔆 Яркость',
+  light_colour:       '🎨 Цвет',
+  light_colour_temp:  '🌡 Цветовая температура',
+  light_mode:         '🔀 Режим (белый / цветной)',
+};
+
+function renderStep2Light(){
+  const sel = wData.entity_id;
+  const selEntity = haLight.find(e=>e.entity_id===sel);
+  // Автозаполняем фичи при первом выборе лампы
+  if(!wData.light_features && selEntity){
+    wData.light_features = [...(selEntity.supported_features||[])];
+  }
+  const list = haLight.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите лампу (light):</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('lightlist').innerHTML=lightItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('lightlist').innerHTML=lightItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="lightlist">${lightItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    ${sel?renderLightFeatures(selEntity):''}`;
+}
+
+function lightItems(){
+  const list=haLight.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Нет ламп</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickLightEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">light</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+
+function renderLightFeatures(entity){
+  const allFeats = ['light_brightness','light_colour','light_colour_temp','light_mode'];
+  const supported = entity?new Set(entity.supported_features||[]):new Set();
+  const selected  = new Set(wData.light_features||[]);
+  return `<div style="margin-top:18px">
+    <div class="fg"><label>Функции в Салюте:</label>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">Отмечены функции, поддерживаемые лампой. Снимите галочку, чтобы отключить.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px">
+      ${allFeats.map(f=>{
+        const isSupported = supported.has(f);
+        const isChecked   = selected.has(f);
+        return `<label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:${isChecked?'var(--primary-lt)':'#fff'};opacity:${isSupported?1:0.5}">
+          <input type="checkbox" ${isChecked?'checked':''} ${!isSupported?'disabled':''} onchange="toggleLightFeature('${f}',this.checked)" style="width:16px;height:16px;accent-color:var(--primary)">
+          <span style="font-size:13px">${LIGHT_FEATURE_LABELS[f]||f}</span>
+          ${!isSupported?'<span style="font-size:10px;color:var(--muted);margin-left:auto">не поддерживается лампой</span>':''}
+        </label>`;
+      }).join('')}
+    </div>
+  </div>`;
+}
+
+function pickLightEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  // Автоматически выбираем поддерживаемые фичи
+  const entity=haLight.find(e=>e.entity_id===eid);
+  wData.light_features=entity?[...(entity.supported_features||[])]:[];
+  document.getElementById('wizContent').innerHTML=renderStep2Light();
+}
+function toggleLightFeature(feat,checked){
+  if(!wData.light_features)wData.light_features=[];
+  if(checked){if(!wData.light_features.includes(feat))wData.light_features.push(feat);}
+  else{wData.light_features=wData.light_features.filter(f=>f!==feat);}
+  // Перерисовываем только блок фич без пересоздания всего шага
+  const entity=haLight.find(e=>e.entity_id===wData.entity_id);
+  const block=document.querySelector('#wizContent > div:last-child');
+  if(block&&wData.entity_id){block.outerHTML=renderLightFeatures(entity);}
+}
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function slugify(t){const m={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'j',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',' ':'_'};return t.toLowerCase().split('').map(c=>m[c]!==undefined?m[c]:(/[a-z0-9]/.test(c)?c:'_')).join('').replace(/_+/g,'_').replace(/^_|_$/g,'')||'device';}

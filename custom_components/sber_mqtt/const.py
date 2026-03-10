@@ -36,6 +36,7 @@ DEVICE_TYPE_SCENARIO_BUTTON = "scenario_button"  # Сценарная кнопк
 DEVICE_TYPE_HVAC_AC         = "hvac_ac"          # Кондиционер
 DEVICE_TYPE_VACUUM          = "vacuum_cleaner"   # Пылесос
 DEVICE_TYPE_VALVE           = "valve"            # Кран / вентиль
+DEVICE_TYPE_LIGHT           = "light"            # Лампа / осветительный прибор
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
@@ -45,6 +46,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_HVAC_AC:         "Кондиционер",
     DEVICE_TYPE_VACUUM:          "Пылесос",
     DEVICE_TYPE_VALVE:           "Кран",
+    DEVICE_TYPE_LIGHT:           "Лампа",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
@@ -158,3 +160,34 @@ SBER_VALVE_COMMAND_TO_HA_SWITCH = {
     "close": ("switch", "turn_off"),
     # stop не поддерживается для switch — игнорируем
 }
+
+# ── Константы для типа "лампа" ────────────────────────────────────────────
+
+# Диапазоны Сбера
+LIGHT_BRIGHTNESS_MIN  = 50
+LIGHT_BRIGHTNESS_MAX  = 1000
+LIGHT_COLOUR_TEMP_MIN = 0
+LIGHT_COLOUR_TEMP_MAX = 1000
+
+# color_mode HA → light_mode Сбера
+# Режимы HA: color_temp, hs, rgb, rgbw, rgbww, xy, white, onoff, brightness, unknown
+# Всё цветовое → colour, остальное → white
+HA_COLOR_MODE_TO_SBER_LIGHT_MODE = {
+    "hs":      "colour",
+    "rgb":     "colour",
+    "rgbw":    "colour",
+    "rgbww":   "colour",
+    "xy":      "colour",
+    "color_temp": "white",
+    "white":   "white",
+    "brightness": "white",
+    "onoff":   "white",
+}
+
+# Фичи лампы, которые пользователь может включить при добавлении
+LIGHT_OPTIONAL_FEATURES = [
+    "light_brightness",
+    "light_colour",
+    "light_colour_temp",
+    "light_mode",
+]

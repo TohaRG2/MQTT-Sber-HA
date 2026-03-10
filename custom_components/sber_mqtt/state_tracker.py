@@ -27,6 +27,7 @@ from .const import (
     DEVICE_TYPE_HVAC_AC,
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
+    DEVICE_TYPE_LIGHT,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -130,6 +131,11 @@ class StateTracker:
                     watched.add(battery_entity)
 
             elif device_type == DEVICE_TYPE_VALVE:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+
+            elif device_type == DEVICE_TYPE_LIGHT:
                 entity_id = attrs.get("entity_id", "")
                 if entity_id:
                     watched.add(entity_id)
@@ -370,6 +376,70 @@ class StateTracker:
             )
 
             payload = self._serializer.build_valve_state_payload(device_id, open_set, open_state)
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_LIGHT:
+            entity_id = attrs.get("entity_id", "")
+            if changed_entity_id != entity_id:
+                return
+
+            light_state = self._hass.states.get(entity_id)
+            if not light_state:
+                return
+
+            is_on = light_state.state == "on"
+            a     = light_state.attributes
+
+            # Определяем активные фичи из конфига устройства
+            features = ["on_off"]
+            for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
+                if attrs.get(feat):
+                    features.append(feat)
+
+            # Яркость: HA 0–255 → 0.0–1.0
+            brightness_pct = None
+            if a.get("brightness") is not None:
+                try:
+                    brightness_pct = float(a["brightness"]) / 255.0
+                except (ValueError, TypeError):
+                    pass
+
+            hs_color          = a.get("hs_color")           # (h, s) или None
+            # Фолбэк: если hs_color не заполнен, но есть rgb_color — конвертируем
+            if hs_color is None and a.get("rgb_color") is not None:
+                try:
+                    import colorsys
+                    r, g, b = [x / 255.0 for x in a["rgb_color"][:3]]
+                    h, s, _ = colorsys.rgb_to_hsv(r, g, b)
+                    hs_color = (h * 360.0, s * 100.0)
+                except Exception:
+                    pass
+            color_temp_mireds = a.get("color_temp")         # мирады или None
+            min_mireds        = a.get("min_mireds")
+            max_mireds        = a.get("max_mireds")
+            color_mode        = a.get("color_mode")
+
+            _LOGGER.debug(
+                "Light %s: is_on=%s brightness=%.2f color_mode=%s",
+                device_id, is_on, brightness_pct or 0, color_mode,
+            )
+
+            payload = self._serializer.build_light_state_payload(
+                device_id=device_id,
+                is_on=is_on,
+                features=features,
+                brightness_pct=brightness_pct,
+                hs_color=hs_color,
+                color_temp_mireds=color_temp_mireds,
+                min_mireds=min_mireds,
+                max_mireds=max_mireds,
+                color_mode=color_mode,
+            )
             self._publish_status(payload)
 
             import json as _json
