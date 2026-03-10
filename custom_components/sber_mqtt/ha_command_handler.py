@@ -47,6 +47,8 @@ class HACommandHandler:
             await self._handle_hvac_ac_command(device, states)
         elif device_type == "vacuum_cleaner":
             await self._handle_vacuum_command(device, states)
+        elif device_type == "valve":
+            await self._handle_valve_command(device, states)
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -234,4 +236,48 @@ class HACommandHandler:
                 _LOGGER.warning(
                     "Пылесос %s: неизвестная команда '%s'",
                     device.get("id"), sber_cmd,
+                )
+
+    async def _handle_valve_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления краном от Сбера.
+
+        open_set:
+          open  → valve.open_valve  / switch.turn_on
+          close → valve.close_valve / switch.turn_off
+          stop  → valve.stop_valve  (только для domain=valve)
+        """
+        from .const import SBER_VALVE_COMMAND_TO_HA_VALVE, SBER_VALVE_COMMAND_TO_HA_SWITCH
+
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+        if not entity_id:
+            _LOGGER.error("Кран %s: не задан entity_id", device.get("id"))
+            return
+
+        domain = entity_id.split(".")[0]
+
+        for state in states:
+            if state.get("key") != "open_set":
+                continue
+
+            sber_cmd = state.get("value", {}).get("enum_value", "")
+
+            if domain == "valve":
+                ha_call = SBER_VALVE_COMMAND_TO_HA_VALVE.get(sber_cmd)
+            else:
+                ha_call = SBER_VALVE_COMMAND_TO_HA_SWITCH.get(sber_cmd)
+
+            if ha_call:
+                d, service = ha_call
+                _LOGGER.info(
+                    "Кран %s: команда '%s' → %s.%s",
+                    device.get("id"), sber_cmd, d, service,
+                )
+                await self._hass.services.async_call(
+                    d, service, {"entity_id": entity_id}, blocking=False
+                )
+            else:
+                _LOGGER.warning(
+                    "Кран %s: команда '%s' не поддерживается для домена '%s'",
+                    device.get("id"), sber_cmd, domain,
                 )

@@ -194,13 +194,14 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
   scenario_button: ['Тип устройства','Источник в HA','Параметры'],
   hvac_ac:         ['Тип устройства','Источник в HA','Параметры'],
   vacuum_cleaner:  ['Тип устройства','Источник в HA','Параметры'],
+  valve:           ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -312,7 +313,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -323,7 +324,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();}
     renderWiz();
   }else{
     await submitDevice();
@@ -344,6 +345,7 @@ async function wizValidate(){
     if(wType==='scenario_button'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='hvac_ac'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
     if(wType==='vacuum_cleaner'&&!wData.entity_id){toast('Выберите пылесос','err');return false;}
+    if(wType==='valve'&&!wData.entity_id){toast('Выберите сущность крана','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
 
@@ -376,7 +378,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -387,6 +389,7 @@ function renderStep1(){
     {id:'scenario_button',icon:'🔔',name:'Сценарная кнопка',desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
     {id:'hvac_ac',icon:'❄️',name:'Кондиционер',desc:'climate: управление температурой и режимами через Салют'},
     {id:'vacuum_cleaner',icon:'🤖',name:'Пылесос',desc:'vacuum: управление уборкой голосом через Салют'},
+    {id:'valve',icon:'🚰',name:'Кран',desc:'valve, switch: открытие и закрытие голосом через Салют'},
   ].map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
     <div class="type-icon">${t.icon}</div>
     <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('');
@@ -481,7 +484,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -505,6 +508,9 @@ async function submitDevice(){
   else if(wType==='vacuum_cleaner'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.battery_entity)attrs.battery_entity=wData.battery_entity;
+  }
+  else if(wType==='valve'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
   }
   else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
@@ -671,6 +677,39 @@ function renderVacBatList(q){
 }
 function pickVacBattery(eid,name){wData.battery_entity=eid;wData.battery_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2Vacuum();}
 function clearVacBattery(){delete wData.battery_entity;delete wData.battery_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Vacuum();}
+
+// ── Кран ──────────────────────────────────────────────────────────────────
+let haValve=[];
+async function fetchValve(){
+  if(haValve.length)return;
+  try{haValve=(await api('/api/sber_mqtt/ha_entities/valve')).entities||[];}
+  catch(e){toast('Ошибка загрузки кранов','err');}
+}
+
+function renderStep2Valve(){
+  const sel=wData.entity_id;
+  const list=haValve.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность крана (valve или switch):</label>
+    <div style="font-size:11px;color:var(--muted);margin-top:3px">valve: поддерживает open/close/stop · switch: поддерживает open/close</div></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('valvelist').innerHTML=valveItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('valvelist').innerHTML=valveItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" id="valvelist">${valveItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}`;
+}
+function valveItems(){
+  const list=haValve.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Нет подходящих сущностей</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickValveEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickValveEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Valve();}
 
 function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 function slugify(t){const m={а:'a',б:'b',в:'v',г:'g',д:'d',е:'e',ё:'yo',ж:'zh',з:'z',и:'i',й:'j',к:'k',л:'l',м:'m',н:'n',о:'o',п:'p',р:'r',с:'s',т:'t',у:'u',ф:'f',х:'h',ц:'ts',ч:'ch',ш:'sh',щ:'sch',ъ:'',ы:'y',ь:'',э:'e',ю:'yu',я:'ya',' ':'_'};return t.toLowerCase().split('').map(c=>m[c]!==undefined?m[c]:(/[a-z0-9]/.test(c)?c:'_')).join('').replace(/_+/g,'_').replace(/^_|_$/g,'')||'device';}

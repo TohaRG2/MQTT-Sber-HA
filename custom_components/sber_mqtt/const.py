@@ -35,6 +35,7 @@ DEVICE_TYPE_SENSOR_TEMP     = "sensor_temp"      # Датчик температ
 DEVICE_TYPE_SCENARIO_BUTTON = "scenario_button"  # Сценарная кнопка: прокидывает события из HA в Сбер
 DEVICE_TYPE_HVAC_AC         = "hvac_ac"          # Кондиционер
 DEVICE_TYPE_VACUUM          = "vacuum_cleaner"   # Пылесос
+DEVICE_TYPE_VALVE           = "valve"            # Кран / вентиль
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
@@ -43,6 +44,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_SCENARIO_BUTTON: "Сценарная кнопка",
     DEVICE_TYPE_HVAC_AC:         "Кондиционер",
     DEVICE_TYPE_VACUUM:          "Пылесос",
+    DEVICE_TYPE_VALVE:           "Кран",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
@@ -126,4 +128,33 @@ SBER_VACUUM_COMMAND_TO_HA = {
     "resume":         ("vacuum", "start"),
     "pause":          ("vacuum", "pause"),
     "return_to_dock": ("vacuum", "return_to_base"),
+}
+
+# ── Домены HA для типа "кран" ─────────────────────────────────────────────
+VALVE_DOMAINS = {"valve", "switch"}
+
+# Маппинг состояния HA → open_set Сбера
+HA_VALVE_STATE_TO_SBER = {
+    # valve domain
+    "open":    "open",
+    "opening": "open",
+    "closed":  "close",
+    "closing": "close",
+    # switch domain
+    "on":      "open",
+    "off":     "close",
+}
+
+# Маппинг команды Сбера → (domain, service) для valve
+SBER_VALVE_COMMAND_TO_HA_VALVE = {
+    "open":  ("valve", "open_valve"),
+    "close": ("valve", "close_valve"),
+    "stop":  ("valve", "stop_valve"),
+}
+
+# Маппинг команды Сбера → (domain, service) для switch
+SBER_VALVE_COMMAND_TO_HA_SWITCH = {
+    "open":  ("switch", "turn_on"),
+    "close": ("switch", "turn_off"),
+    # stop не поддерживается для switch — игнорируем
 }

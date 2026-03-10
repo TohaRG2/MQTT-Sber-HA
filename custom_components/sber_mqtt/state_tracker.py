@@ -26,6 +26,7 @@ from .const import (
     DEVICE_TYPE_SCENARIO_BUTTON,
     DEVICE_TYPE_HVAC_AC,
     DEVICE_TYPE_VACUUM,
+    DEVICE_TYPE_VALVE,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -34,6 +35,7 @@ from .const import (
     SCENARIO_BUTTON_DOUBLE_CLICK,
     HA_HVAC_MODE_TO_SBER,
     HA_VACUUM_STATUS_TO_SBER,
+    HA_VALVE_STATE_TO_SBER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -126,6 +128,11 @@ class StateTracker:
                 battery_entity = attrs.get("battery_entity", "")
                 if battery_entity:
                     watched.add(battery_entity)
+
+            elif device_type == DEVICE_TYPE_VALVE:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -325,6 +332,44 @@ class StateTracker:
             )
 
             payload = self._serializer.build_vacuum_state_payload(device_id, sber_status, battery)
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_VALVE:
+            entity_id = attrs.get("entity_id", "")
+            if changed_entity_id != entity_id:
+                return
+
+            valve_state = self._hass.states.get(entity_id)
+            if not valve_state:
+                return
+
+            ha_state  = valve_state.state
+            domain    = entity_id.split(".")[0]
+
+            # open_set: открыт или закрыт
+            open_set = HA_VALVE_STATE_TO_SBER.get(ha_state, "close")
+
+            # open_state: детальный статус (opening/closing/open/close/stopped)
+            if ha_state == "opening":
+                open_state = "opening"
+            elif ha_state == "closing":
+                open_state = "closing"
+            elif open_set == "open":
+                open_state = "open"
+            else:
+                open_state = "close"
+
+            _LOGGER.debug(
+                "Valve %s: ha_state=%s → open_set=%s open_state=%s",
+                device_id, ha_state, open_set, open_state,
+            )
+
+            payload = self._serializer.build_valve_state_payload(device_id, open_set, open_state)
             self._publish_status(payload)
 
             import json as _json

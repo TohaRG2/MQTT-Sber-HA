@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -173,6 +173,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHASensorsView,
         SberHAEntitiesClimateView,
         SberHAEntitiesVacuumView,
+        SberHAEntitiesValveView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -185,6 +186,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHASensorsView(hass))
     hass.http.register_view(SberHAEntitiesClimateView(hass))
     hass.http.register_view(SberHAEntitiesVacuumView(hass))
+    hass.http.register_view(SberHAEntitiesValveView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -420,5 +422,24 @@ def _build_current_state_payload(
                     pass
 
         return serializer.build_vacuum_state_payload(device_id, sber_status, battery)
+
+    if device_type == "valve":
+        entity_id = attrs.get("entity_id", "")
+        valve_state = hass.states.get(entity_id)
+        if not valve_state:
+            return None
+
+        ha_state = valve_state.state
+        open_set = HA_VALVE_STATE_TO_SBER.get(ha_state, "close")
+        if ha_state == "opening":
+            open_state = "opening"
+        elif ha_state == "closing":
+            open_state = "closing"
+        elif open_set == "open":
+            open_state = "open"
+        else:
+            open_state = "close"
+
+        return serializer.build_valve_state_payload(device_id, open_set, open_state)
 
     return None

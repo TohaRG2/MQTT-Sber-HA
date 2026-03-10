@@ -64,6 +64,7 @@ from .const import (
     DEVICE_TYPE_SCENARIO_BUTTON,
     DEVICE_TYPE_HVAC_AC,
     DEVICE_TYPE_VACUUM,
+    DEVICE_TYPE_VALVE,
     HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
@@ -126,6 +127,8 @@ class SberSerializer:
             return self._hvac_ac_config(device_id, device)
         if device_type == DEVICE_TYPE_VACUUM:
             return self._vacuum_config(device_id, device)
+        if device_type == DEVICE_TYPE_VALVE:
+            return self._valve_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -277,6 +280,30 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _valve_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для крана (valve).
+
+        Категория Сбера: valve.
+        Обязательные функции: online, open_state, open_set.
+        """
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_valve",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_valve",
+                "category": DEVICE_TYPE_VALVE,
+                "features": ["online", "open_state", "open_set"],
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
     # ── Payload состояния ──────────────────────────────────────────────────
 
     def build_root_state_payload(self) -> str:
@@ -395,6 +422,24 @@ class SberSerializer:
                 })
             except (ValueError, TypeError):
                 pass
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_valve_state_payload(
+        self,
+        device_id: str,
+        open_set: str,
+        open_state: str,
+    ) -> str:
+        """Состояние крана.
+
+        open_set   — текущее положение: open / close
+        open_state — статус открытия: open / close / opening / closing / stopped
+        """
+        states: list[dict] = [
+            {"key": "online",     "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "open_set",   "value": {"type": "ENUM", "enum_value": open_set}},
+            {"key": "open_state", "value": {"type": "ENUM", "enum_value": open_state}},
+        ]
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_sensor_temp_state_payload(
