@@ -28,6 +28,7 @@ from .const import (
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
     DEVICE_TYPE_LIGHT,
+    DEVICE_TYPE_COVER,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -37,6 +38,8 @@ from .const import (
     HA_HVAC_MODE_TO_SBER,
     HA_VACUUM_STATUS_TO_SBER,
     HA_VALVE_STATE_TO_SBER,
+    HA_COVER_STATE_TO_SBER_OPEN_SET,
+    HA_COVER_STATE_TO_SBER_OPEN_STATE,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -139,6 +142,14 @@ class StateTracker:
                 entity_id = attrs.get("entity_id", "")
                 if entity_id:
                     watched.add(entity_id)
+
+            elif device_type == DEVICE_TYPE_COVER:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                battery_entity = attrs.get("battery_entity", "")
+                if battery_entity:
+                    watched.add(battery_entity)
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -439,6 +450,52 @@ class StateTracker:
                 min_mireds=min_mireds,
                 max_mireds=max_mireds,
                 color_mode=color_mode,
+            )
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_COVER:
+            entity_id      = attrs.get("entity_id", "")
+            battery_entity = attrs.get("battery_entity", "")
+            if changed_entity_id not in {entity_id, battery_entity}:
+                return
+
+            cover_state = self._hass.states.get(entity_id)
+            if not cover_state:
+                return
+
+            ha_state     = cover_state.state
+            open_set     = HA_COVER_STATE_TO_SBER_OPEN_SET.get(ha_state, "close")
+            open_state_v = HA_COVER_STATE_TO_SBER_OPEN_STATE.get(ha_state, "close")
+
+            # current_position: HA 0–100 (0=закрыто, 100=открыто)
+            pos = cover_state.attributes.get("current_position")
+            try:
+                open_percentage = max(0, min(100, round(float(pos)))) if pos is not None else (100 if open_set == "open" else 0)
+            except (ValueError, TypeError):
+                open_percentage = 0
+
+            # Заряд батареи
+            battery = None
+            if battery_entity:
+                s = self._hass.states.get(battery_entity)
+                if s and s.state not in ("unavailable", "unknown", ""):
+                    try:
+                        battery = float(s.state)
+                    except (ValueError, TypeError):
+                        pass
+
+            _LOGGER.debug(
+                "Cover %s: ha_state=%s → open_set=%s open_state=%s pos=%s battery=%s",
+                device_id, ha_state, open_set, open_state_v, open_percentage, battery,
+            )
+
+            payload = self._serializer.build_cover_state_payload(
+                device_id, open_set, open_state_v, open_percentage, battery
             )
             self._publish_status(payload)
 

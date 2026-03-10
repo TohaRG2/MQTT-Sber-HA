@@ -51,6 +51,8 @@ class HACommandHandler:
             await self._handle_valve_command(device, states)
         elif device_type == "light":
             await self._handle_light_command(device, states)
+        elif device_type == "cover":
+            await self._handle_cover_command(device, states)
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -388,3 +390,57 @@ class HACommandHandler:
         await self._hass.services.async_call(
             "light", service, service_data, blocking=False
         )
+
+    async def _handle_cover_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления шторами/жалюзи от Сбера.
+
+        open_set:
+          open  → cover.open_cover
+          close → cover.close_cover
+          stop  → cover.stop_cover
+
+        open_percentage:
+          0–100 → cover.set_cover_position(position=...)
+        """
+        from .const import SBER_COVER_COMMAND_TO_HA
+
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+        if not entity_id:
+            _LOGGER.error("Шторы %s: не задан entity_id", device.get("id"))
+            return
+
+        for state in states:
+            key = state.get("key")
+            val = state.get("value", {})
+
+            if key == "open_set":
+                sber_cmd = val.get("enum_value", "")
+                ha_call  = SBER_COVER_COMMAND_TO_HA.get(sber_cmd)
+                if ha_call:
+                    domain, service = ha_call
+                    _LOGGER.info(
+                        "Шторы %s: команда '%s' → %s.%s",
+                        device.get("id"), sber_cmd, domain, service,
+                    )
+                    await self._hass.services.async_call(
+                        domain, service, {"entity_id": entity_id}, blocking=False
+                    )
+                else:
+                    _LOGGER.warning("Шторы %s: неизвестная команда '%s'", device.get("id"), sber_cmd)
+
+            elif key == "open_percentage":
+                try:
+                    pct = int(val.get("integer_value", 0))
+                    pct = max(0, min(100, pct))
+                    _LOGGER.info(
+                        "Шторы %s: open_percentage=%s → cover.set_cover_position",
+                        device.get("id"), pct,
+                    )
+                    await self._hass.services.async_call(
+                        "cover", "set_cover_position",
+                        {"entity_id": entity_id, "position": pct},
+                        blocking=False,
+                    )
+                except (ValueError, TypeError):
+                    pass

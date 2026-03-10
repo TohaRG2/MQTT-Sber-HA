@@ -37,6 +37,7 @@ DEVICE_TYPE_HVAC_AC         = "hvac_ac"          # Кондиционер
 DEVICE_TYPE_VACUUM          = "vacuum_cleaner"   # Пылесос
 DEVICE_TYPE_VALVE           = "valve"            # Кран / вентиль
 DEVICE_TYPE_LIGHT           = "light"            # Лампа / осветительный прибор
+DEVICE_TYPE_COVER           = "cover"            # Рулонные шторы / жалюзи
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
@@ -47,6 +48,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_VACUUM:          "Пылесос",
     DEVICE_TYPE_VALVE:           "Кран",
     DEVICE_TYPE_LIGHT:           "Лампа",
+    DEVICE_TYPE_COVER:           "Рулонные шторы / жалюзи",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
@@ -191,3 +193,30 @@ LIGHT_OPTIONAL_FEATURES = [
     "light_colour_temp",
     "light_mode",
 ]
+
+# ── Маппинги для типа "шторы/жалюзи" (cover) ─────────────────────────────
+# Сбер категория: window_blind
+# HA domain: cover
+
+# Состояние HA → open_set Сбера
+HA_COVER_STATE_TO_SBER_OPEN_SET = {
+    "open":    "open",
+    "opening": "open",
+    "closed":  "close",
+    "closing": "close",
+}
+
+# Состояние HA → open_state Сбера
+HA_COVER_STATE_TO_SBER_OPEN_STATE = {
+    "open":    "open",
+    "opening": "opening",
+    "closed":  "close",
+    "closing": "closing",
+}
+
+# Команда Сбера → сервис HA
+SBER_COVER_COMMAND_TO_HA = {
+    "open":  ("cover", "open_cover"),
+    "close": ("cover", "close_cover"),
+    "stop":  ("cover", "stop_cover"),
+}

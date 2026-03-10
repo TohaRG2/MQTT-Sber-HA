@@ -37,6 +37,7 @@ from .const import (
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
     DEVICE_TYPE_LIGHT,
+    DEVICE_TYPE_COVER,
     SUPPORTED_DEVICE_TYPES,
 )
 from .ha_helpers import get_entities_for_relay, get_sensor_entities
@@ -179,6 +180,11 @@ class SberDevicesView(HomeAssistantView):
             if not attrs.get("entity_id"):
                 return web.json_response(
                     {"error": "attributes.entity_id is required for light"}, status=400
+                )
+        elif device_type == DEVICE_TYPE_COVER:
+            if not attrs.get("entity_id"):
+                return web.json_response(
+                    {"error": "attributes.entity_id is required for cover"}, status=400
                 )
 
         # Формируем запись устройства
@@ -697,6 +703,67 @@ class SberHAEntitiesLightView(HomeAssistantView):
                 "friendly_name":     friendly_name,
                 "area":              area_name,
                 "supported_features": supported_features,
+            })
+        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
+        return web.json_response({"entities": result})
+
+
+# ── GET /api/sber_mqtt/ha_entities/cover ─────────────────────────────────
+
+class SberHAEntitiesCoverView(HomeAssistantView):
+    """Список cover-сущностей HA для привязки к шторам/жалюзи."""
+
+    url  = "/api/sber_mqtt/ha_entities/cover"
+    name = "api:sber_mqtt:ha_entities_cover"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
+        hass: HomeAssistant = request.app["hass"]
+        entity_reg = er.async_get(hass)
+        area_reg   = ar.async_get(hass)
+        device_reg = dr.async_get(hass)
+        result = []
+        for entry in entity_reg.entities.values():
+            if entry.domain != "cover":
+                continue
+            if entry.disabled_by:
+                continue
+            state = hass.states.get(entry.entity_id)
+            friendly_name = (
+                state.attributes.get("friendly_name", entry.entity_id) if state
+                else (entry.name or entry.entity_id)
+            )
+            # Текущая позиция для отображения в UI
+            current_position = None
+            if state:
+                pos = state.attributes.get("current_position")
+                if pos is not None:
+                    try:
+                        current_position = int(float(pos))
+                    except (ValueError, TypeError):
+                        pass
+            area_name = ""
+            if entry.area_id:
+                area = area_reg.async_get_area(entry.area_id)
+                if area:
+                    area_name = area.name
+            elif entry.device_id:
+                dev = device_reg.async_get(entry.device_id)
+                if dev and dev.area_id:
+                    area = area_reg.async_get_area(dev.area_id)
+                    if area:
+                        area_name = area.name
+            result.append({
+                "entity_id":        entry.entity_id,
+                "domain":           "cover",
+                "friendly_name":    friendly_name,
+                "area":             area_name,
+                "current_position": current_position,
+                "device_id":        entry.device_id or "",
             })
         result.sort(key=lambda x: (x["area"], x["friendly_name"]))
         return web.json_response({"entities": result})

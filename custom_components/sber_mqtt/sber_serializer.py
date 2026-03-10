@@ -66,6 +66,7 @@ from .const import (
     DEVICE_TYPE_VACUUM,
     DEVICE_TYPE_VALVE,
     DEVICE_TYPE_LIGHT,
+    DEVICE_TYPE_COVER,
     HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
@@ -137,6 +138,8 @@ class SberSerializer:
             return self._valve_config(device_id, device)
         if device_type == DEVICE_TYPE_LIGHT:
             return self._light_config(device_id, device)
+        if device_type == DEVICE_TYPE_COVER:
+            return self._cover_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -363,6 +366,41 @@ class SberSerializer:
             "hw_version": HW_VERSION,
             "sw_version": SW_VERSION,
             "model": model,
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _cover_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для рулонных штор / жалюзи (window_blind).
+
+        Обязательные функции: online, open_state, open_set, open_percentage.
+        Опциональная: battery_percentage (если задан датчик).
+        """
+        attrs = device.get("attributes", {})
+        features = ["online", "open_state", "open_set", "open_percentage"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_window_blind",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_window_blind",
+                "category": "window_blind",
+                "features": features,
+                "allowed_values": {
+                    "open_percentage": {
+                        "type": "INTEGER",
+                        "integer_values": {"min": "0", "max": "100", "step": "5"},
+                    }
+                },
+            },
             "model_id": "",
         }
         if device.get("room"):
@@ -597,6 +635,47 @@ class SberSerializer:
                 "value": {"type": "ENUM", "enum_value": sber_mode},
             })
 
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_cover_state_payload(
+        self,
+        device_id: str,
+        open_set: str,
+        open_state: str,
+        open_percentage: int,
+        battery: float | None = None,
+    ) -> str:
+        """Состояние рулонных штор / жалюзи.
+
+        open_set        — open / close
+        open_state      — open / close / opening / closing
+        open_percentage — 0–100 (текущая позиция из HA current_position)
+        battery         — заряд батареи 0–100 (опционально)
+
+        Правило консистентности open_set / open_percentage:
+          open_percentage > 0  → open_set = open
+          open_percentage == 0 → open_set = close
+        """
+        # Гарантируем консистентность open_set ↔ open_percentage
+        if open_percentage > 0 and open_set == "close":
+            open_set = "open"
+        elif open_percentage == 0 and open_set == "open":
+            open_set = "close"
+
+        states: list[dict] = [
+            {"key": "online",           "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "open_set",         "value": {"type": "ENUM", "enum_value": open_set}},
+            {"key": "open_state",       "value": {"type": "ENUM", "enum_value": open_state}},
+            {"key": "open_percentage",  "value": {"type": "INTEGER", "integer_value": open_percentage}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_sensor_temp_state_payload(

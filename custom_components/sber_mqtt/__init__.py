@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -175,6 +175,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesVacuumView,
         SberHAEntitiesValveView,
         SberHAEntitiesLightView,
+        SberHAEntitiesCoverView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -189,6 +190,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesVacuumView(hass))
     hass.http.register_view(SberHAEntitiesValveView(hass))
     hass.http.register_view(SberHAEntitiesLightView(hass))
+    hass.http.register_view(SberHAEntitiesCoverView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -485,6 +487,36 @@ def _build_current_state_payload(
             min_mireds=a.get("min_mireds"),
             max_mireds=a.get("max_mireds"),
             color_mode=a.get("color_mode"),
+        )
+
+    if device_type == "cover":
+        entity_id = attrs.get("entity_id", "")
+        cover_state = hass.states.get(entity_id)
+        if not cover_state:
+            return None
+
+        ha_state     = cover_state.state
+        open_set     = HA_COVER_STATE_TO_SBER_OPEN_SET.get(ha_state, "close")
+        open_state_v = HA_COVER_STATE_TO_SBER_OPEN_STATE.get(ha_state, "close")
+
+        pos = cover_state.attributes.get("current_position")
+        try:
+            open_percentage = max(0, min(100, round(float(pos)))) if pos is not None else (100 if open_set == "open" else 0)
+        except (ValueError, TypeError):
+            open_percentage = 0
+
+        battery = None
+        battery_entity = attrs.get("battery_entity", "")
+        if battery_entity:
+            s = hass.states.get(battery_entity)
+            if s and s.state not in ("unavailable", "unknown", ""):
+                try:
+                    battery = float(s.state)
+                except (ValueError, TypeError):
+                    pass
+
+        return serializer.build_cover_state_payload(
+            device_id, open_set, open_state_v, open_percentage, battery
         )
 
     return None
