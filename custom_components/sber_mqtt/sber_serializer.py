@@ -145,18 +145,33 @@ class SberSerializer:
 
     def _relay_config(self, device_id: str, device: dict) -> dict:
         """Конфиг для реле (switch, light, button и т.д.)."""
+        attrs    = device.get("attributes", {})
+        features = ["online", "on_off"]
+
+        # Опциональные фичи энергомониторинга — добавляем только если задан сенсор
+        if attrs.get("power_entity"):
+            features.append("power")
+        if attrs.get("current_entity"):
+            features.append("current")
+        if attrs.get("voltage_entity"):
+            features.append("voltage")
+
+        model: dict = {
+            "id": "ID_relay",
+            "manufacturer": MANUFACTURER,
+            "model": "Model_relay",
+            "category": DEVICE_TYPE_RELAY,
+            "features": features,
+        }
+
+        # allowed_values не отправляем намеренно: Могут быть проблемы с принятием Сбером таких устройств
+
         entry = {
             "id": device_id,
             "name": device.get("name", device_id),
             "hw_version": HW_VERSION,
             "sw_version": SW_VERSION,
-            "model": {
-                "id": "ID_relay",
-                "manufacturer": MANUFACTURER,
-                "model": "Model_relay",
-                "category": DEVICE_TYPE_RELAY,
-                "features": ["online", "on_off"],
-            },
+            "model": model,
             "model_id": "",
         }
         # Комната опциональна — добавляем только если задана
@@ -218,14 +233,6 @@ class SberSerializer:
                 "model": "Model_scenario_button",
                 "category": DEVICE_TYPE_SCENARIO_BUTTON,
                 "features": ["online", "button_event"],
-                "allowed_values": {
-                    "button_event": {
-                        "type": "ENUM",
-                        "enum_values": {
-                            "values": ["click", "double_click"],
-                        },
-                    }
-                },
             },
             "model_id": "",
         }
@@ -330,26 +337,6 @@ class SberSerializer:
             if attrs.get(feat):
                 features.append(feat)
 
-        allowed_values: dict = {}
-        if "light_brightness" in features:
-            allowed_values["light_brightness"] = {
-                "type": "INTEGER",
-                "integer_values": {
-                    "min": str(LIGHT_BRIGHTNESS_MIN),
-                    "max": str(LIGHT_BRIGHTNESS_MAX),
-                    "step": "1",
-                },
-            }
-        if "light_colour_temp" in features:
-            allowed_values["light_colour_temp"] = {
-                "type": "INTEGER",
-                "integer_values": {
-                    "min": str(LIGHT_COLOUR_TEMP_MIN),
-                    "max": str(LIGHT_COLOUR_TEMP_MAX),
-                    "step": "1",
-                },
-            }
-
         model: dict = {
             "id": "ID_light",
             "manufacturer": MANUFACTURER,
@@ -357,8 +344,6 @@ class SberSerializer:
             "category": DEVICE_TYPE_LIGHT,
             "features": features,
         }
-        if allowed_values:
-            model["allowed_values"] = allowed_values
 
         entry = {
             "id": device_id,
@@ -394,12 +379,6 @@ class SberSerializer:
                 "model": "Model_window_blind",
                 "category": "window_blind",
                 "features": features,
-                "allowed_values": {
-                    "open_percentage": {
-                        "type": "INTEGER",
-                        "integer_values": {"min": "0", "max": "100", "step": "5"},
-                    }
-                },
             },
             "model_id": "",
         }
@@ -422,19 +401,40 @@ class SberSerializer:
         }
         return json.dumps(payload, ensure_ascii=False)
 
-    def build_relay_state_payload(self, device_id: str, is_on: bool) -> str:
-        """Состояние реле: онлайн + вкл/выкл."""
-        payload = {
-            "devices": {
-                device_id: {
-                    "states": [
-                        {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
-                        {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
-                    ]
-                }
-            }
-        }
-        return json.dumps(payload, ensure_ascii=False)
+    def build_relay_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        power: float | None = None,
+        current: float | None = None,
+        voltage: float | None = None,
+    ) -> str:
+        """Состояние реле: онлайн + вкл/выкл + опциональные показания энергомониторинга.
+
+        power   — мощность, Вт (0–50000)
+        current — ток, мА (0–30000)
+        voltage — напряжение, В (0–5000)
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        if power is not None:
+            try:
+                states.append({"key": "power",   "value": {"type": "INTEGER", "integer_value": max(0, min(50000, round(float(power))))}})
+            except (ValueError, TypeError):
+                pass
+        if current is not None:
+            try:
+                states.append({"key": "current", "value": {"type": "INTEGER", "integer_value": max(0, min(30000, round(float(current))))}})
+            except (ValueError, TypeError):
+                pass
+        if voltage is not None:
+            try:
+                states.append({"key": "voltage", "value": {"type": "INTEGER", "integer_value": max(0, min(5000,  round(float(voltage))))}})
+            except (ValueError, TypeError):
+                pass
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_scenario_button_event_payload(self, device_id: str, event: str) -> str:
         """Событие сценарной кнопки: онлайн + тип нажатия.

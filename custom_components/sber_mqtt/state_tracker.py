@@ -98,6 +98,10 @@ class StateTracker:
                 # Кнопки и сценарии не имеют состояния — не отслеживаем
                 if domain in RELAY_STATEFUL_DOMAINS:
                     watched.add(entity_id)
+                # Энергосенсоры — отслеживаем независимо от домена
+                for key in ("power_entity", "current_entity", "voltage_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
 
             elif device_type == DEVICE_TYPE_SENSOR_TEMP:
                 # Отслеживаем все заполненные слоты датчика
@@ -192,15 +196,41 @@ class StateTracker:
 
         if device_type == DEVICE_TYPE_RELAY:
             bound_entity = attrs.get("entity_id", "")
-            if bound_entity != changed_entity_id:
-                return  # изменилась не наша сущность
+            energy_entities = {
+                attrs.get("power_entity"),
+                attrs.get("current_entity"),
+                attrs.get("voltage_entity"),
+            } - {None, ""}
+            # Реагируем на изменение основной сущности или любого энергосенсора
+            if changed_entity_id != bound_entity and changed_entity_id not in energy_entities:
+                return
 
             # Определяем новое значение on/off
             # Для media_player: "off" = выключен, остальные состояния (on/idle/playing/paused) = включён
-            if changed_entity_id.startswith("media_player."):
-                is_on = new_state.state != "off"
+            relay_state = self._hass.states.get(bound_entity)
+            if relay_state is None:
+                return
+
+            if bound_entity.startswith("media_player."):
+                is_on = relay_state.state != "off"
             else:
-                is_on = new_state.state == "on"
+                is_on = relay_state.state == "on"
+
+            # Читаем показания энергосенсоров
+            def _read_sensor(eid: str | None) -> float | None:
+                if not eid:
+                    return None
+                s = self._hass.states.get(eid)
+                if not s or s.state in ("unavailable", "unknown", ""):
+                    return None
+                try:
+                    return float(s.state)
+                except (ValueError, TypeError):
+                    return None
+
+            power   = _read_sensor(attrs.get("power_entity"))
+            current = _read_sensor(attrs.get("current_entity"))
+            voltage = _read_sensor(attrs.get("voltage_entity"))
 
             # Проверка на дубль: не отправляем если состояние не изменилось.
             # last_state теперь хранит {"states": [{"key": "on_off", "value": {...}}]}
@@ -210,18 +240,22 @@ class StateTracker:
                 if s.get("key") == "on_off":
                     last_on_off = s.get("value", {}).get("bool_value")
                     break
-            if last_on_off == is_on:
+            # Для энергосенсоров не проверяем дубли — всегда публикуем актуальные значения
+            if last_on_off == is_on and changed_entity_id == bound_entity and not energy_entities:
                 return
 
             _LOGGER.debug(
-                "Relay %s: изменение состояния %s → %s",
+                "Relay %s: изменение состояния %s → %s (power=%s current=%s voltage=%s)",
                 device_id,
                 "on" if last_on_off else "off",
                 "on" if is_on else "off",
+                power, current, voltage,
             )
 
             # Публикуем новое состояние в Сбер
-            payload = self._serializer.build_relay_state_payload(device_id, is_on)
+            payload = self._serializer.build_relay_state_payload(
+                device_id, is_on, power=power, current=current, voltage=voltage
+            )
             self._publish_status(payload)
 
             # Сохраняем полный отправленный payload как last_state

@@ -89,6 +89,7 @@ def get_entities_for_relay(hass: HomeAssistant) -> list[dict[str, Any]]:
             "domain":        domain,
             "friendly_name": friendly_name,
             "area":          area,
+            "device_id":     entry.device_id or "",
         })
 
     # Сортируем: сначала по комнате, потом по имени

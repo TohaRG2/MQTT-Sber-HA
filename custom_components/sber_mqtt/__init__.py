@@ -324,11 +324,27 @@ def _build_current_state_payload(
         else:
             state = hass.states.get(entity_id)
             if state:
-                # media_player: всё кроме "off" считается включённым
                 is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
             else:
                 is_on = False
-        return serializer.build_relay_state_payload(device_id, is_on)
+
+        def _relay_sensor(eid: str | None) -> float | None:
+            if not eid:
+                return None
+            s = hass.states.get(eid)
+            if not s or s.state in ("unavailable", "unknown", ""):
+                return None
+            try:
+                return float(s.state)
+            except (ValueError, TypeError):
+                return None
+
+        return serializer.build_relay_state_payload(
+            device_id, is_on,
+            power=_relay_sensor(attrs.get("power_entity")),
+            current=_relay_sensor(attrs.get("current_entity")),
+            voltage=_relay_sensor(attrs.get("voltage_entity")),
+        )
 
     if device_type == "sensor_temp":
         def _val(eid: str | None) -> float | None:

@@ -44,8 +44,8 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#fafafa}
 .state-cell:hover{white-space:normal;word-break:break-all;max-width:none}
 .empty{text-align:center;padding:56px 20px;color:var(--muted)}
 .empty .ei{font-size:44px;margin-bottom:14px}.empty h3{font-size:17px;margin-bottom:6px;color:var(--text)}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:center;justify-content:center;padding:12px}
-.modal{background:var(--card);border-radius:14px;width:100%;max-width:660px;max-height:92vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto}
+.modal{background:var(--card);border-radius:14px;width:100%;max-width:660px;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2);max-height:calc(100vh - 40px)}
 .m-hdr{padding:18px 20px 0;display:flex;align-items:center;justify-content:space-between}
 .m-hdr h2{font-size:17px;font-weight:600}
 .m-close{background:none;border:none;cursor:pointer;font-size:20px;color:var(--muted);padding:4px;border-radius:6px;line-height:1}.m-close:hover{background:var(--bg)}
@@ -326,7 +326,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await fetchRelay();if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);}
     renderWiz();
   }else{
     await submitDevice();
@@ -403,6 +403,24 @@ function renderStep1(){
 function pickType(t){wType=t;renderWiz();}
 
 function renderStep2Relay(){
+  const sel=wData.entity_id;
+  const energySlots=[
+    {key:'power_entity',   label:'⚡ Мощность',  dc:'power'},
+    {key:'current_entity', label:'🔌 Ток',        dc:'current'},
+    {key:'voltage_entity', label:'🔋 Напряжение', dc:'voltage'},
+  ];
+  const energyHtml=energySlots.map(slot=>{
+    const eid=wData[slot.key]||'';
+    const s=eid?haSensors.find(x=>x.entity_id===eid):null;
+    return `<div class="sf">
+      <label>${slot.label} <span style="color:var(--muted);font-weight:400">(опционально)</span></label>
+      <button class="sf-btn ${eid?'filled':''}" onclick="openRelaySensorPicker('${slot.key}','${slot.dc}')">
+        <span>${eid?(s?.friendly_name||eid):'Выбрать сенсор…'}</span><span>${eid?'✓':'▾'}</span>
+      </button>
+      ${eid?`<div class="sf-sub">${esc(eid)} <button class="sf-clr" onclick="clearRelaySensor('${slot.key}')">✕</button></div>`:''}
+    </div>`;
+  }).join('');
+
   return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label></div>
     <div class="picker">
       <div class="psearch"><span style="color:var(--muted)">🔍</span>
@@ -411,18 +429,68 @@ function renderStep2Relay(){
         <button class="clr" onclick="sFilter='';document.getElementById('plist').innerHTML=relayItems()">✕</button>
       </div>
       <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
-      <div class="p-list" id="plist">${relayItems()}</div>
+      <div class="p-list" style="max-height:160px" id="plist">${relayItems()}</div>
     </div>
-    ${wData.entity_id?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(wData.entity_id)}</b></div>`:''}`;
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#fafafa">
+      <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--fg)">⚡ Энергомониторинг <span style="font-weight:400;color:var(--muted)">(опционально)</span></div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Сенсоры автоматически подтягиваются при выборе сущности. Не заданы — данные не передаются в Салют.</div>
+      ${energyHtml}
+    </div>
+    <div id="relaySensorPickerWrap" style="display:none;margin-top:10px">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="relaySensorInput" type="text" placeholder="Поиск…" oninput="renderRelaySensorList(this.value)"/>
+          <button class="clr" onclick="relaySensorInput.value='';renderRelaySensorList('')">✕</button>
+        </div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" style="max-height:160px" id="relaySensorList"></div>
+      </div>
+    </div>`;
 }
+let _relaySensorPickerKey='', _relaySensorPickerDc='';
+function openRelaySensorPicker(key, dc){
+  _relaySensorPickerKey=key; _relaySensorPickerDc=dc;
+  const wrap=document.getElementById('relaySensorPickerWrap');
+  wrap.style.display='';
+  document.getElementById('relaySensorInput').value='';
+  renderRelaySensorList('');
+  wrap.scrollIntoView({behavior:'smooth'});
+}
+function renderRelaySensorList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class===_relaySensorPickerDc);
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('relaySensorList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_relaySensorPickerKey]===s.entity_id?'sel':''}" onclick="pickRelaySensor('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет сенсоров класса «${_relaySensorPickerDc}»</div>`;
+}
+function pickRelaySensor(eid,name){
+  wData[_relaySensorPickerKey]=eid;
+  document.getElementById('wizContent').innerHTML=renderStep2Relay();
+}
+function clearRelaySensor(key){delete wData[key];document.getElementById('wizContent').innerHTML=renderStep2Relay();}
+
 function relayItems(){
   const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
     <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
-function pickEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Relay();}
+function pickEntity(eid,name,area,deviceId){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  // Автоподбор энергосенсоров по device_id
+  if(deviceId){
+    const byDc={power:'power_entity',current:'current_entity',voltage:'voltage_entity'};
+    for(const [dc,key] of Object.entries(byDc)){
+      const found=haSensors.find(s=>s.device_class===dc&&s.device_id===deviceId);
+      if(found)wData[key]=found.entity_id; else delete wData[key];
+    }
+  }
+  document.getElementById('wizContent').innerHTML=renderStep2Relay();
+}
 
 function renderStep2ScenarioButton(){
   return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label>
@@ -505,7 +573,12 @@ function autoId(){const n=document.getElementById('dName')?.value||'';const f=do
 
 async function submitDevice(){
   const attrs={};
-  if(wType==='relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
+  if(wType==='relay'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.power_entity)  attrs.power_entity=wData.power_entity;
+    if(wData.current_entity)attrs.current_entity=wData.current_entity;
+    if(wData.voltage_entity)attrs.voltage_entity=wData.voltage_entity;
+  }
   else if(wType==='scenario_button'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
   else if(wType==='hvac_ac'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
@@ -547,7 +620,7 @@ async function submitDevice(){
 }
 
 async function fetchRelay(){if(haRelay.length)return;try{haRelay=(await api('/api/sber_mqtt/ha_entities/relay')).entities||[];}catch(e){toast('Ошибка загрузки сущностей','err');}}
-async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,battery,signal_strength')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
+async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,battery,signal_strength,power,current,voltage')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
 
 let haClimate=[];
 async function fetchClimate(){if(haClimate.length)return;try{haClimate=(await api('/api/sber_mqtt/ha_entities/climate')).entities||[];}catch(e){toast('Ошибка загрузки климата','err');}}
