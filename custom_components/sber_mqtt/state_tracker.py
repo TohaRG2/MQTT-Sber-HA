@@ -31,6 +31,7 @@ from .const import (
     DEVICE_TYPE_COVER,
     DEVICE_TYPE_WATER_LEAK,
     DEVICE_TYPE_HUMIDIFIER,
+    DEVICE_TYPE_SOCKET,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -98,13 +99,8 @@ class StateTracker:
             if device_type == DEVICE_TYPE_RELAY:
                 entity_id = attrs.get("entity_id", "")
                 domain    = entity_id.split(".")[0] if entity_id else ""
-                # Кнопки и сценарии не имеют состояния — не отслеживаем
                 if domain in RELAY_STATEFUL_DOMAINS:
                     watched.add(entity_id)
-                # Энергосенсоры — отслеживаем независимо от домена
-                for key in ("power_entity", "current_entity", "voltage_entity"):
-                    if attrs.get(key):
-                        watched.add(attrs[key])
 
             elif device_type == DEVICE_TYPE_SENSOR_TEMP:
                 # Отслеживаем все заполненные слоты датчика
@@ -174,6 +170,14 @@ class StateTracker:
                     if attrs.get(key):
                         watched.add(attrs[key])
 
+            elif device_type == DEVICE_TYPE_SOCKET:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                for key in ("power_entity", "current_entity", "voltage_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
+
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
             return
@@ -215,17 +219,9 @@ class StateTracker:
 
         if device_type == DEVICE_TYPE_RELAY:
             bound_entity = attrs.get("entity_id", "")
-            energy_entities = {
-                attrs.get("power_entity"),
-                attrs.get("current_entity"),
-                attrs.get("voltage_entity"),
-            } - {None, ""}
-            # Реагируем на изменение основной сущности или любого энергосенсора
-            if changed_entity_id != bound_entity and changed_entity_id not in energy_entities:
+            if changed_entity_id != bound_entity:
                 return
 
-            # Определяем новое значение on/off
-            # Для media_player: "off" = выключен, остальные состояния (on/idle/playing/paused) = включён
             relay_state = self._hass.states.get(bound_entity)
             if relay_state is None:
                 return
@@ -235,49 +231,22 @@ class StateTracker:
             else:
                 is_on = relay_state.state == "on"
 
-            # Читаем показания энергосенсоров
-            def _read_sensor(eid: str | None) -> float | None:
-                if not eid:
-                    return None
-                s = self._hass.states.get(eid)
-                if not s or s.state in ("unavailable", "unknown", ""):
-                    return None
-                try:
-                    return float(s.state)
-                except (ValueError, TypeError):
-                    return None
-
-            power   = _read_sensor(attrs.get("power_entity"))
-            current = _read_sensor(attrs.get("current_entity"))
-            voltage = _read_sensor(attrs.get("voltage_entity"))
-
-            # Проверка на дубль: не отправляем если состояние не изменилось.
-            # last_state теперь хранит {"states": [{"key": "on_off", "value": {...}}]}
+            # Проверка на дубль
             last = device.get("last_state", {})
             last_on_off = None
             for s in last.get("states", []):
                 if s.get("key") == "on_off":
                     last_on_off = s.get("value", {}).get("bool_value")
                     break
-            # Для энергосенсоров не проверяем дубли — всегда публикуем актуальные значения
-            if last_on_off == is_on and changed_entity_id == bound_entity and not energy_entities:
+            if last_on_off == is_on:
                 return
 
-            _LOGGER.debug(
-                "Relay %s: изменение состояния %s → %s (power=%s current=%s voltage=%s)",
-                device_id,
-                "on" if last_on_off else "off",
-                "on" if is_on else "off",
-                power, current, voltage,
-            )
+            _LOGGER.debug("Relay %s: %s → %s", device_id,
+                          "on" if last_on_off else "off", "on" if is_on else "off")
 
-            # Публикуем новое состояние в Сбер
-            payload = self._serializer.build_relay_state_payload(
-                device_id, is_on, power=power, current=current, voltage=voltage
-            )
+            payload = self._serializer.build_relay_state_payload(device_id, is_on)
             self._publish_status(payload)
 
-            # Сохраняем полный отправленный payload как last_state
             import json as _json
             self._hass.async_create_task(
                 self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
@@ -671,6 +640,48 @@ class StateTracker:
                 air_flow_power=air_flow_power,
                 replace_filter=replace_filter,
                 water_percentage=water_percentage,
+            )
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_SOCKET:
+            bound_entity    = attrs.get("entity_id", "")
+            energy_entities = {attrs.get("power_entity"), attrs.get("current_entity"), attrs.get("voltage_entity")} - {None, ""}
+            if changed_entity_id not in ({bound_entity} | energy_entities):
+                return
+
+            socket_state = self._hass.states.get(bound_entity)
+            if socket_state is None:
+                return
+
+            is_on = socket_state.state == "on"
+
+            def _read_sensor(eid: str | None) -> float | None:
+                if not eid:
+                    return None
+                s = self._hass.states.get(eid)
+                if not s or s.state in ("unavailable", "unknown", ""):
+                    return None
+                try:
+                    return float(s.state)
+                except (ValueError, TypeError):
+                    return None
+
+            power   = _read_sensor(attrs.get("power_entity"))
+            current = _read_sensor(attrs.get("current_entity"))
+            voltage = _read_sensor(attrs.get("voltage_entity"))
+
+            _LOGGER.debug(
+                "Socket %s: on=%s power=%s current=%s voltage=%s",
+                device_id, is_on, power, current, voltage,
+            )
+
+            payload = self._serializer.build_socket_state_payload(
+                device_id, is_on, power=power, current=current, voltage=voltage
             )
             self._publish_status(payload)
 

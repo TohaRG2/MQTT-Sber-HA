@@ -203,7 +203,7 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха', socket:'Розетка' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
@@ -215,10 +215,11 @@ const STEPS = {
   cover:           ['Тип устройства','Источник в HA','Параметры'],
   water_leak:      ['Тип устройства','Источник в HA','Параметры'],
   humidifier:      ['Тип устройства','Источник в HA','Параметры'],
+  socket:          ['Тип устройства','Источник в HA','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
-let wStep=1, wType=null, wData={}, haRelay=[], haSensors=[], sFilter='', spField=null;
+let wStep=1, wType=null, wData={}, haRelay=[], haSensors=[], haSocket=[], sFilter='', spField=null;
 
 async function loadStatus() {
   try {
@@ -317,7 +318,7 @@ async function doImport(input){
 }
 
 function showImportConfirm(devs){
-  const existingIds=new Set(allDevices.map(d=>d.id));
+  const existingIds=new Set(devices.map(d=>d.id));
   const newCnt=devs.filter(d=>!existingIds.has(d.id)).length;
   const updCnt=devs.filter(d=> existingIds.has(d.id)).length;
   const overlay=document.createElement('div');
@@ -408,7 +409,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);}
     renderWiz();
   }else{
     await submitDevice();
@@ -426,6 +427,7 @@ async function wizValidate(){
   } else if(wStep===2&&!isLast){
     // Шаг 2 — выбор сущности (только если не последний шаг)
     if(wType==='relay'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
+    if(wType==='socket'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='scenario_button'&&!wData.entity_id){toast('Выберите сущность','err');return false;}
     if(wType==='hvac_ac'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
     if(wType==='vacuum_cleaner'&&!wData.entity_id){toast('Выберите пылесос','err');return false;}
@@ -466,7 +468,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -474,6 +476,7 @@ function renderStep1(){
   const groups=[
     {label:'Управление', items:[
       {id:'relay',          icon:'🔌', name:'Реле',                    desc:'switch, light, input_boolean, media_player, script, button — включение и выключение'},
+      {id:'socket',         icon:'🔋', name:'Розетка',                 desc:'switch, input_boolean — включение/выключение + энергомониторинг (мощность, ток, напряжение)'},
       {id:'light',          icon:'💡', name:'Лампа',                   desc:'light — яркость, цвет, цветовая температура'},
       {id:'hvac_ac',        icon:'❄️', name:'Кондиционер',             desc:'climate — температура и режимы работы'},
       {id:'humidifier',     icon:'💧', name:'Увлажнитель воздуха',     desc:'humidifier — влажность, режим, скорость вентилятора'},
@@ -499,24 +502,6 @@ function renderStep1(){
 function pickType(t){wType=t;renderWiz();}
 
 function renderStep2Relay(){
-  const sel=wData.entity_id;
-  const energySlots=[
-    {key:'power_entity',   label:'⚡ Мощность',  dc:'power'},
-    {key:'current_entity', label:'🔌 Ток',        dc:'current'},
-    {key:'voltage_entity', label:'🔋 Напряжение', dc:'voltage'},
-  ];
-  const energyHtml=energySlots.map(slot=>{
-    const eid=wData[slot.key]||'';
-    const s=eid?haSensors.find(x=>x.entity_id===eid):null;
-    return `<div class="sf">
-      <label>${slot.label} <span style="color:var(--muted);font-weight:400">(опционально)</span></label>
-      <button class="sf-btn ${eid?'filled':''}" onclick="openRelaySensorPicker('${slot.key}','${slot.dc}')">
-        <span>${eid?(s?.friendly_name||eid):'Выбрать сенсор…'}</span><span>${eid?'✓':'▾'}</span>
-      </button>
-      ${eid?`<div class="sf-sub">${esc(eid)} <button class="sf-clr" onclick="clearRelaySensor('${slot.key}')">✕</button></div>`:''}
-    </div>`;
-  }).join('');
-
   return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label></div>
     <div class="picker">
       <div class="psearch"><span style="color:var(--muted)">🔍</span>
@@ -525,24 +510,9 @@ function renderStep2Relay(){
         <button class="clr" onclick="sFilter='';document.getElementById('plist').innerHTML=relayItems()">✕</button>
       </div>
       <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
-      <div class="p-list" style="max-height:160px" id="plist">${relayItems()}</div>
+      <div class="p-list" style="max-height:200px" id="plist">${relayItems()}</div>
     </div>
-    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
-    <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#fafafa">
-      <div style="font-size:12px;font-weight:600;margin-bottom:10px;color:var(--fg)">⚡ Энергомониторинг <span style="font-weight:400;color:var(--muted)">(опционально)</span></div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Сенсоры автоматически подтягиваются при выборе сущности. Не заданы — данные не передаются в Салют.</div>
-      ${energyHtml}
-    </div>
-    <div id="relaySensorPickerWrap" style="display:none;margin-top:10px">
-      <div class="picker">
-        <div class="psearch"><span style="color:var(--muted)">🔍</span>
-          <input id="relaySensorInput" type="text" placeholder="Поиск…" oninput="renderRelaySensorList(this.value)"/>
-          <button class="clr" onclick="relaySensorInput.value='';renderRelaySensorList('')">✕</button>
-        </div>
-        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
-        <div class="p-list" style="max-height:160px" id="relaySensorList"></div>
-      </div>
-    </div>`;
+    ${wData.entity_id?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(wData.entity_id)}</b></div>`:''}`;
 }
 let _relaySensorPickerKey='', _relaySensorPickerDc='';
 function openRelaySensorPicker(key, dc){
@@ -577,6 +547,28 @@ function relayItems(){
 }
 function pickEntity(eid,name,area,deviceId){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Relay();
+}
+
+function pickEntity(eid,name,area,deviceId){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Relay();
+}
+
+// ── Socket (розетка с энергомониторингом) ────────────────────────────────────
+async function fetchSocket(){
+  try{const d=await api('/api/sber_mqtt/ha_entities/socket');haSocket=d.entities||[];}
+  catch(e){haSocket=[];}
+}
+function socketItems(){
+  const list=haSocket.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickSocketEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickSocketEntity(eid,name,area,deviceId){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
   // Автоподбор энергосенсоров по device_id
   if(deviceId){
     const byDc={power:'power_entity',current:'current_entity',voltage:'voltage_entity'};
@@ -585,7 +577,77 @@ function pickEntity(eid,name,area,deviceId){
       if(found)wData[key]=found.entity_id; else delete wData[key];
     }
   }
-  document.getElementById('wizContent').innerHTML=renderStep2Relay();
+  document.getElementById('wizContent').innerHTML=renderStep2Socket();
+}
+let _socketSensorPickerKey='', _socketSensorPickerDc='';
+function openSocketSensorPicker(key,dc){
+  _socketSensorPickerKey=key; _socketSensorPickerDc=dc;
+  const wrap=document.getElementById('socketSensorPickerWrap');
+  wrap.style.display='';
+  document.getElementById('socketSensorInput').value='';
+  renderSocketSensorList('');
+  wrap.scrollIntoView({behavior:'smooth'});
+}
+function renderSocketSensorList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class===_socketSensorPickerDc);
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('socketSensorList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_socketSensorPickerKey]===s.entity_id?'sel':''}" onclick="pickSocketSensor('${esc(s.entity_id)}')">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет сенсоров класса «${_socketSensorPickerDc}»</div>`;
+}
+function pickSocketSensor(eid){
+  wData[_socketSensorPickerKey]=eid;
+  document.getElementById('wizContent').innerHTML=renderStep2Socket();
+}
+function clearSocketSensor(key){delete wData[key];document.getElementById('wizContent').innerHTML=renderStep2Socket();}
+
+function renderStep2Socket(){
+  const energySlots=[
+    {key:'power_entity',   label:'⚡ Мощность',  dc:'power'},
+    {key:'current_entity', label:'🔌 Ток',        dc:'current'},
+    {key:'voltage_entity', label:'🔋 Напряжение', dc:'voltage'},
+  ];
+  const energyHtml=energySlots.map(slot=>{
+    const eid=wData[slot.key]||'';
+    const s=eid?haSensors.find(x=>x.entity_id===eid):null;
+    return `<div class="sf">
+      <label>${slot.label} <span style="color:var(--danger);font-weight:400">*</span></label>
+      <button class="sf-btn ${eid?'filled':''}" onclick="openSocketSensorPicker('${slot.key}','${slot.dc}')">
+        <span>${eid?(s?.friendly_name||eid):'Выбрать сенсор…'}</span><span>${eid?'✓':'▾'}</span>
+      </button>
+      ${eid?`<div class="sf-sub">${esc(eid)} <button class="sf-clr" onclick="clearSocketSensor('${slot.key}')">✕</button></div>`:''}
+    </div>`;
+  }).join('');
+
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите сущность HA:</label>
+    <div style="font-size:11px;color:var(--muted);margin-top:3px">switch или input_boolean</div></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('sklist').innerHTML=socketItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('sklist').innerHTML=socketItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" style="max-height:150px" id="sklist">${socketItems()}</div>
+    </div>
+    ${wData.entity_id?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(wData.entity_id)}</b></div>`:''}
+    <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:#fafafa">
+      <div style="font-size:12px;font-weight:600;margin-bottom:6px;color:var(--fg)">⚡ Энергомониторинг</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:10px">Сенсоры автоматически подбираются при выборе устройства. Обязательны для типа «Розетка».</div>
+      ${energyHtml}
+    </div>
+    <div id="socketSensorPickerWrap" style="display:none;margin-top:10px">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="socketSensorInput" type="text" placeholder="Поиск…" oninput="renderSocketSensorList(this.value)"/>
+          <button class="clr" onclick="socketSensorInput.value='';renderSocketSensorList('')">✕</button>
+        </div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" style="max-height:150px" id="socketSensorList"></div>
+      </div>
+    </div>`;
 }
 
 function renderStep2ScenarioButton(){
@@ -668,7 +730,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -713,6 +775,12 @@ async function submitDevice(){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.water_percentage_entity)attrs.water_percentage_entity=wData.water_percentage_entity;
     if(wData.replace_filter_entity)  attrs.replace_filter_entity=wData.replace_filter_entity;
+  }
+  else if(wType==='socket'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.power_entity)  attrs.power_entity=wData.power_entity;
+    if(wData.current_entity)attrs.current_entity=wData.current_entity;
+    if(wData.voltage_entity)attrs.voltage_entity=wData.voltage_entity;
   }
   else if(wType==='light'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';

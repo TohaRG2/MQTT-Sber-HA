@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK, DEVICE_TYPE_HUMIDIFIER, HA_MODE_TO_SBER_AIR_FLOW
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK, DEVICE_TYPE_HUMIDIFIER, HA_MODE_TO_SBER_AIR_FLOW, DEVICE_TYPE_SOCKET
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -178,6 +178,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesCoverView,
         SberHAEntitiesWaterLeakView,
         SberHAEntitiesHumidifierView,
+        SberHAEntitiesSocketView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -195,6 +196,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesCoverView(hass))
     hass.http.register_view(SberHAEntitiesWaterLeakView(hass))
     hass.http.register_view(SberHAEntitiesHumidifierView(hass))
+    hass.http.register_view(SberHAEntitiesSocketView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -331,24 +333,7 @@ def _build_current_state_payload(
                 is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
             else:
                 is_on = False
-
-        def _relay_sensor(eid: str | None) -> float | None:
-            if not eid:
-                return None
-            s = hass.states.get(eid)
-            if not s or s.state in ("unavailable", "unknown", ""):
-                return None
-            try:
-                return float(s.state)
-            except (ValueError, TypeError):
-                return None
-
-        return serializer.build_relay_state_payload(
-            device_id, is_on,
-            power=_relay_sensor(attrs.get("power_entity")),
-            current=_relay_sensor(attrs.get("current_entity")),
-            voltage=_relay_sensor(attrs.get("voltage_entity")),
-        )
+        return serializer.build_relay_state_payload(device_id, is_on)
 
     if device_type == "sensor_temp":
         def _val(eid: str | None) -> float | None:
@@ -622,6 +607,29 @@ def _build_current_state_payload(
             air_flow_power=air_flow_power,
             replace_filter=replace_filter,
             water_percentage=_sensor_float(attrs.get("water_percentage_entity")),
+        )
+
+    if device_type == "socket":
+        entity_id = attrs.get("entity_id", "")
+        state = hass.states.get(entity_id)
+        is_on = state.state == "on" if state else False
+
+        def _socket_sensor(eid: str | None) -> float | None:
+            if not eid:
+                return None
+            s = hass.states.get(eid)
+            if not s or s.state in ("unavailable", "unknown", ""):
+                return None
+            try:
+                return float(s.state)
+            except (ValueError, TypeError):
+                return None
+
+        return serializer.build_socket_state_payload(
+            device_id, is_on,
+            power=_socket_sensor(attrs.get("power_entity")),
+            current=_socket_sensor(attrs.get("current_entity")),
+            voltage=_socket_sensor(attrs.get("voltage_entity")),
         )
 
     return None

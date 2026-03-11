@@ -69,6 +69,7 @@ from .const import (
     DEVICE_TYPE_COVER,
     DEVICE_TYPE_WATER_LEAK,
     DEVICE_TYPE_HUMIDIFIER,
+    DEVICE_TYPE_SOCKET,
     HA_HVAC_MODE_TO_SBER,
     HA_MODE_TO_SBER_AIR_FLOW,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
@@ -147,32 +148,20 @@ class SberSerializer:
             return self._water_leak_config(device_id, device)
         if device_type == DEVICE_TYPE_HUMIDIFIER:
             return self._humidifier_config(device_id, device)
+        if device_type == DEVICE_TYPE_SOCKET:
+            return self._socket_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
     def _relay_config(self, device_id: str, device: dict) -> dict:
-        """Конфиг для реле (switch, light, button и т.д.)."""
-        attrs    = device.get("attributes", {})
-        features = ["online", "on_off"]
-
-        # Опциональные фичи энергомониторинга — добавляем только если задан сенсор
-        if attrs.get("power_entity"):
-            features.append("power")
-        if attrs.get("current_entity"):
-            features.append("current")
-        if attrs.get("voltage_entity"):
-            features.append("voltage")
-
+        """Конфиг для реле (switch, light, button и т.д.) — только вкл/выкл."""
         model: dict = {
             "id": "ID_relay",
             "manufacturer": MANUFACTURER,
             "model": "Model_relay",
             "category": DEVICE_TYPE_RELAY,
-            "features": features,
+            "features": ["online", "on_off"],
         }
-
-        # allowed_values не отправляем намеренно: Могут быть проблемы с принятием Сбером таких устройств
-
         entry = {
             "id": device_id,
             "name": device.get("name", device_id),
@@ -181,7 +170,6 @@ class SberSerializer:
             "model": model,
             "model_id": "",
         }
-        # Комната опциональна — добавляем только если задана
         if device.get("room"):
             entry["room"] = device["room"]
         return entry
@@ -472,7 +460,40 @@ class SberSerializer:
         }
         return json.dumps(payload, ensure_ascii=False)
 
-    def build_relay_state_payload(
+    def build_relay_state_payload(self, device_id: str, is_on: bool) -> str:
+        """Состояние реле: онлайн + вкл/выкл."""
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def _socket_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для розетки с энергомониторингом (socket).
+
+        Обязательные функции: online, on_off.
+        Обязательные для этого типа: power, current, voltage.
+        """
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_socket",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_socket",
+                "category": "socket",
+                "features": ["online", "on_off", "power", "current", "voltage"],
+            },
+            "model_id": "",
+        }
+        # allowed_values не отправляем намеренно: Могут быть проблемы с принятием Сбером таких устройств
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def build_socket_state_payload(
         self,
         device_id: str,
         is_on: bool,
@@ -480,11 +501,11 @@ class SberSerializer:
         current: float | None = None,
         voltage: float | None = None,
     ) -> str:
-        """Состояние реле: онлайн + вкл/выкл + опциональные показания энергомониторинга.
+        """Состояние розетки: онлайн + вкл/выкл + показания энергомониторинга.
 
-        power   — мощность, Вт (0–50000)
-        current — ток, мА (0–30000)
-        voltage — напряжение, В (0–5000)
+        power   — мощность, Вт   (0–50000)
+        current — ток, мА        (0–30000)
+        voltage — напряжение, В  (0–5000)
         """
         states: list[dict] = [
             {"key": "online", "value": {"type": "BOOL", "bool_value": True}},

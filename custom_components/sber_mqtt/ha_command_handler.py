@@ -56,6 +56,9 @@ class HACommandHandler:
         elif device_type == "humidifier":
             await self._handle_humidifier_command(device, states)
         elif device_type == "water_leak":
+            pass  # датчик, команды не принимает
+        elif device_type == "socket":
+            await self._handle_relay_command(device, states)  # on_off — та же логика что у реле
             _LOGGER.debug("Команда для датчика протечки %s проигнорирована", device.get("id"))
         else:
             _LOGGER.warning(

@@ -40,6 +40,7 @@ DEVICE_TYPE_LIGHT           = "light"            # Лампа / осветите
 DEVICE_TYPE_COVER           = "cover"            # Рулонные шторы / жалюзи
 DEVICE_TYPE_WATER_LEAK      = "water_leak"       # Датчик протечки
 DEVICE_TYPE_HUMIDIFIER      = "humidifier"       # Увлажнитель воздуха
+DEVICE_TYPE_SOCKET          = "socket"           # Розетка с энергомониторингом
 
 # Маппинг скоростей вентилятора Сбер → HA (humidifier mode)
 # Сбер: auto | low | medium | high | turbo | quiet
@@ -66,6 +67,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_COVER:           "Рулонные шторы / жалюзи",
     DEVICE_TYPE_WATER_LEAK:      "Датчик протечки",
     DEVICE_TYPE_HUMIDIFIER:      "Увлажнитель воздуха",
+    DEVICE_TYPE_SOCKET:          "Розетка",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
