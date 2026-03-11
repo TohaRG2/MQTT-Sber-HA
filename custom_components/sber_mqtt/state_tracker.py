@@ -30,6 +30,7 @@ from .const import (
     DEVICE_TYPE_LIGHT,
     DEVICE_TYPE_COVER,
     DEVICE_TYPE_WATER_LEAK,
+    DEVICE_TYPE_HUMIDIFIER,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -41,6 +42,7 @@ from .const import (
     HA_VALVE_STATE_TO_SBER,
     HA_COVER_STATE_TO_SBER_OPEN_SET,
     HA_COVER_STATE_TO_SBER_OPEN_STATE,
+    HA_MODE_TO_SBER_AIR_FLOW,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -163,6 +165,14 @@ class StateTracker:
                 battery_entity = attrs.get("battery_entity", "")
                 if battery_entity:
                     watched.add(battery_entity)
+
+            elif device_type == DEVICE_TYPE_HUMIDIFIER:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                for key in ("water_percentage_entity", "replace_filter_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
 
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
@@ -575,6 +585,72 @@ class StateTracker:
 
             payload = self._serializer.build_water_leak_state_payload(
                 device_id, leak_detected, battery
+            )
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_HUMIDIFIER:
+            entity_id = attrs.get("entity_id", "")
+            extra_entities = {attrs.get("water_percentage_entity"), attrs.get("replace_filter_entity")} - {None, ""}
+            if changed_entity_id not in ({entity_id} | extra_entities):
+                return
+
+            state = self._hass.states.get(entity_id)
+            if not state:
+                return
+
+            is_on = state.state not in ("off", "unavailable", "unknown")
+
+            def _float_attr(attr: str) -> float | None:
+                try:
+                    v = state.attributes.get(attr)
+                    return float(v) if v is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            def _sensor_float(eid: str | None) -> float | None:
+                if not eid:
+                    return None
+                s = self._hass.states.get(eid)
+                if not s or s.state in ("unavailable", "unknown", ""):
+                    return None
+                try:
+                    return float(s.state)
+                except (ValueError, TypeError):
+                    return None
+
+            current_humidity = _float_attr("current_humidity")
+            target_humidity  = _float_attr("humidity")  # target_humidity в HA называется humidity
+            ha_mode          = state.attributes.get("mode")
+            air_flow_power   = HA_MODE_TO_SBER_AIR_FLOW.get(ha_mode) if ha_mode else None
+
+            # hvac_replace_filter: читаем из binary_sensor (on = нужна замена)
+            replace_filter_eid = attrs.get("replace_filter_entity")
+            replace_filter: bool | None = None
+            if replace_filter_eid:
+                rs = self._hass.states.get(replace_filter_eid)
+                if rs and rs.state not in ("unavailable", "unknown", ""):
+                    replace_filter = rs.state == "on"
+
+            water_percentage = _sensor_float(attrs.get("water_percentage_entity"))
+
+            _LOGGER.debug(
+                "Humidifier %s: on=%s hum=%s→%s mode=%s filter=%s water=%s%%",
+                device_id, is_on, current_humidity, target_humidity,
+                air_flow_power, replace_filter, water_percentage,
+            )
+
+            payload = self._serializer.build_humidifier_state_payload(
+                device_id, is_on,
+                current_humidity=current_humidity,
+                target_humidity=target_humidity,
+                air_flow_power=air_flow_power,
+                replace_filter=replace_filter,
+                water_percentage=water_percentage,
             )
             self._publish_status(payload)
 

@@ -39,6 +39,7 @@ from .const import (
     DEVICE_TYPE_LIGHT,
     DEVICE_TYPE_COVER,
     DEVICE_TYPE_WATER_LEAK,
+    DEVICE_TYPE_HUMIDIFIER,
     SUPPORTED_DEVICE_TYPES,
 )
 from .ha_helpers import get_entities_for_relay, get_sensor_entities
@@ -191,6 +192,11 @@ class SberDevicesView(HomeAssistantView):
             if not attrs.get("entity_id"):
                 return web.json_response(
                     {"error": "attributes.entity_id is required for water_leak"}, status=400
+                )
+        elif device_type == DEVICE_TYPE_HUMIDIFIER:
+            if not attrs.get("entity_id"):
+                return web.json_response(
+                    {"error": "attributes.entity_id is required for humidifier"}, status=400
                 )
 
         # Формируем запись устройства
@@ -825,6 +831,64 @@ class SberHAEntitiesWaterLeakView(HomeAssistantView):
                 "friendly_name": friendly_name,
                 "area":          area_name,
                 "device_id":     entry.device_id or "",
+            })
+        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
+        return web.json_response({"entities": result})
+
+
+# ── GET /api/sber_mqtt/ha_entities/humidifier ─────────────────────────────
+
+class SberHAEntitiesHumidifierView(HomeAssistantView):
+    """Список humidifier-сущностей HA для увлажнителя воздуха."""
+
+    url  = "/api/sber_mqtt/ha_entities/humidifier"
+    name = "api:sber_mqtt:ha_entities_humidifier"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
+        hass: HomeAssistant = request.app["hass"]
+        entity_reg = er.async_get(hass)
+        area_reg   = ar.async_get(hass)
+        device_reg = dr.async_get(hass)
+        result = []
+        for entry in entity_reg.entities.values():
+            if entry.domain != "humidifier":
+                continue
+            if entry.disabled_by:
+                continue
+            state = hass.states.get(entry.entity_id)
+            friendly_name = (
+                state.attributes.get("friendly_name", entry.entity_id) if state
+                else (entry.name or entry.entity_id)
+            )
+            area_name = ""
+            if entry.area_id:
+                area = area_reg.async_get_area(entry.area_id)
+                if area:
+                    area_name = area.name
+            elif entry.device_id:
+                dev = device_reg.async_get(entry.device_id)
+                if dev and dev.area_id:
+                    area = area_reg.async_get_area(dev.area_id)
+                    if area:
+                        area_name = area.name
+
+            # Определяем поддерживаемые режимы
+            modes: list[str] = []
+            if state:
+                modes = state.attributes.get("available_modes", []) or []
+
+            result.append({
+                "entity_id":     entry.entity_id,
+                "domain":        "humidifier",
+                "friendly_name": friendly_name,
+                "area":          area_name,
+                "device_id":     entry.device_id or "",
+                "available_modes": modes,
             })
         result.sort(key=lambda x: (x["area"], x["friendly_name"]))
         return web.json_response({"entities": result})

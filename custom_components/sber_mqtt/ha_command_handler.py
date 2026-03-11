@@ -53,6 +53,10 @@ class HACommandHandler:
             await self._handle_light_command(device, states)
         elif device_type == "cover":
             await self._handle_cover_command(device, states)
+        elif device_type == "humidifier":
+            await self._handle_humidifier_command(device, states)
+        elif device_type == "water_leak":
+            _LOGGER.debug("Команда для датчика протечки %s проигнорирована", device.get("id"))
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -444,3 +448,67 @@ class HACommandHandler:
                     )
                 except (ValueError, TypeError):
                     pass
+
+    async def _handle_humidifier_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления увлажнителем от Сбера.
+
+        Поддерживаемые команды:
+          on_off              — включить/выключить (humidifier.turn_on / turn_off)
+          hvac_humidity_set   — установить целевую влажность (humidifier.set_humidity)
+          hvac_air_flow_power — установить режим/скорость (humidifier.set_mode)
+        """
+        from .const import SBER_AIR_FLOW_TO_HA_MODE
+
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+
+        if not entity_id:
+            _LOGGER.error("Увлажнитель %s: не задан entity_id", device.get("id"))
+            return
+
+        for state in states:
+            key     = state.get("key")
+            val_obj = state.get("value", {})
+
+            if key == "on_off":
+                raw = val_obj.get("bool_value")
+                if isinstance(raw, bool):
+                    is_on = raw
+                elif isinstance(raw, str):
+                    is_on = raw.lower() in ("true", "1", "on")
+                else:
+                    is_on = False
+                service = "turn_on" if is_on else "turn_off"
+                _LOGGER.info("Humidifier %s: on_off=%s → humidifier.%s", device.get("id"), is_on, service)
+                await self._hass.services.async_call(
+                    "humidifier", service, {"entity_id": entity_id}, blocking=False
+                )
+
+            elif key == "hvac_humidity_set":
+                humidity = val_obj.get("integer_value")
+                if humidity is not None:
+                    try:
+                        h = max(0, min(100, int(float(humidity))))
+                        _LOGGER.info("Humidifier %s: set_humidity=%d", device.get("id"), h)
+                        await self._hass.services.async_call(
+                            "humidifier", "set_humidity",
+                            {"entity_id": entity_id, "humidity": h},
+                            blocking=False,
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning("Humidifier %s: невалидная влажность: %s", device.get("id"), humidity)
+
+            elif key == "hvac_air_flow_power":
+                sber_mode = val_obj.get("enum_value", "")
+                ha_mode   = SBER_AIR_FLOW_TO_HA_MODE.get(sber_mode)
+                if ha_mode:
+                    _LOGGER.info("Humidifier %s: set_mode=%s (sber=%s)", device.get("id"), ha_mode, sber_mode)
+                    await self._hass.services.async_call(
+                        "humidifier", "set_mode",
+                        {"entity_id": entity_id, "mode": ha_mode},
+                        blocking=False,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "Humidifier %s: неизвестный режим Сбера '%s'", device.get("id"), sber_mode
+                    )

@@ -39,6 +39,20 @@ DEVICE_TYPE_VALVE           = "valve"            # Кран / вентиль
 DEVICE_TYPE_LIGHT           = "light"            # Лампа / осветительный прибор
 DEVICE_TYPE_COVER           = "cover"            # Рулонные шторы / жалюзи
 DEVICE_TYPE_WATER_LEAK      = "water_leak"       # Датчик протечки
+DEVICE_TYPE_HUMIDIFIER      = "humidifier"       # Увлажнитель воздуха
+
+# Маппинг скоростей вентилятора Сбер → HA (humidifier mode)
+# Сбер: auto | low | medium | high | turbo | quiet
+# HA humidifier.set_mode принимает произвольные строки — передаём как есть
+SBER_AIR_FLOW_TO_HA_MODE: dict[str, str] = {
+    "auto":   "auto",
+    "low":    "low",
+    "medium": "medium",
+    "high":   "high",
+    "turbo":  "turbo",
+    "quiet":  "quiet",
+}
+HA_MODE_TO_SBER_AIR_FLOW: dict[str, str] = {v: k for k, v in SBER_AIR_FLOW_TO_HA_MODE.items()}
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
@@ -51,6 +65,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_LIGHT:           "Лампа",
     DEVICE_TYPE_COVER:           "Рулонные шторы / жалюзи",
     DEVICE_TYPE_WATER_LEAK:      "Датчик протечки",
+    DEVICE_TYPE_HUMIDIFIER:      "Увлажнитель воздуха",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────

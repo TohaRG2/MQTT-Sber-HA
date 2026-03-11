@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK, DEVICE_TYPE_HUMIDIFIER, HA_MODE_TO_SBER_AIR_FLOW
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -177,6 +177,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesLightView,
         SberHAEntitiesCoverView,
         SberHAEntitiesWaterLeakView,
+        SberHAEntitiesHumidifierView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -193,6 +194,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesLightView(hass))
     hass.http.register_view(SberHAEntitiesCoverView(hass))
     hass.http.register_view(SberHAEntitiesWaterLeakView(hass))
+    hass.http.register_view(SberHAEntitiesHumidifierView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -556,5 +558,50 @@ def _build_current_state_payload(
                     pass
 
         return serializer.build_water_leak_state_payload(device_id, leak_detected, battery)
+
+    if device_type == "humidifier":
+        entity_id = attrs.get("entity_id", "")
+        state = hass.states.get(entity_id)
+        if not state:
+            return None
+
+        is_on = state.state not in ("off", "unavailable", "unknown")
+
+        def _float_attr(attr: str) -> float | None:
+            try:
+                v = state.attributes.get(attr)
+                return float(v) if v is not None else None
+            except (ValueError, TypeError):
+                return None
+
+        def _sensor_float(eid: str | None) -> float | None:
+            if not eid:
+                return None
+            s = hass.states.get(eid)
+            if not s or s.state in ("unavailable", "unknown", ""):
+                return None
+            try:
+                return float(s.state)
+            except (ValueError, TypeError):
+                return None
+
+        ha_mode       = state.attributes.get("mode")
+        air_flow_power = HA_MODE_TO_SBER_AIR_FLOW.get(ha_mode) if ha_mode else None
+
+        replace_filter_eid = attrs.get("replace_filter_entity")
+        replace_filter: bool | None = None
+        if replace_filter_eid:
+            rs = hass.states.get(replace_filter_eid)
+            if rs and rs.state not in ("unavailable", "unknown", ""):
+                replace_filter = rs.state == "on"
+
+        return serializer.build_humidifier_state_payload(
+            device_id, is_on,
+            current_humidity=_float_attr("current_humidity"),
+            target_humidity=_float_attr("humidity"),
+            air_flow_power=air_flow_power,
+            replace_filter=replace_filter,
+            water_percentage=_sensor_float(attrs.get("water_percentage_entity")),
+        )
 
     return None

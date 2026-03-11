@@ -68,7 +68,9 @@ from .const import (
     DEVICE_TYPE_LIGHT,
     DEVICE_TYPE_COVER,
     DEVICE_TYPE_WATER_LEAK,
+    DEVICE_TYPE_HUMIDIFIER,
     HA_HVAC_MODE_TO_SBER,
+    HA_MODE_TO_SBER_AIR_FLOW,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
     LIGHT_BRIGHTNESS_MIN,
@@ -143,6 +145,8 @@ class SberSerializer:
             return self._cover_config(device_id, device)
         if device_type == DEVICE_TYPE_WATER_LEAK:
             return self._water_leak_config(device_id, device)
+        if device_type == DEVICE_TYPE_HUMIDIFIER:
+            return self._humidifier_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -410,6 +414,41 @@ class SberSerializer:
                 "manufacturer": MANUFACTURER,
                 "model": "Model_water_leak",
                 "category": "sensor_water_leak",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _humidifier_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для увлажнителя воздуха (hvac_humidifier).
+
+        Обязательные функции: online, on_off.
+        Остальные: humidity, hvac_air_flow_power, hvac_humidity_set,
+                   hvac_replace_filter, hvac_water_percentage.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "on_off", "humidity", "hvac_air_flow_power",
+                    "hvac_humidity_set", "hvac_replace_filter", "hvac_water_percentage"]
+
+        # Убираем опциональные фичи если сенсор не задан
+        if not attrs.get("water_percentage_entity"):
+            features.remove("hvac_water_percentage")
+        if not attrs.get("replace_filter_entity"):
+            features.remove("hvac_replace_filter")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_humidifier",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_humidifier",
+                "category": "hvac_humidifier",
                 "features": features,
             },
             "model_id": "",
@@ -730,6 +769,65 @@ class SberSerializer:
                 states.append({
                     "key": "battery_percentage",
                     "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_humidifier_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        current_humidity: float | None = None,
+        target_humidity: float | None = None,
+        air_flow_power: str | None = None,
+        replace_filter: bool | None = None,
+        water_percentage: float | None = None,
+    ) -> str:
+        """Состояние увлажнителя воздуха.
+
+        is_on            — включён/выключён
+        current_humidity — текущая влажность 0–100 (humidity)
+        target_humidity  — целевая влажность 0–100 (hvac_humidity_set)
+        air_flow_power   — скорость вентилятора в терминах Сбера (hvac_air_flow_power)
+        replace_filter   — нужно ли менять фильтр, bool (hvac_replace_filter)
+        water_percentage — уровень воды в баке 0–100 (hvac_water_percentage)
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        if current_humidity is not None:
+            try:
+                states.append({
+                    "key": "humidity",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(current_humidity))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if target_humidity is not None:
+            try:
+                states.append({
+                    "key": "hvac_humidity_set",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(target_humidity))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if air_flow_power:
+            states.append({
+                "key": "hvac_air_flow_power",
+                "value": {"type": "ENUM", "enum_value": air_flow_power},
+            })
+        if replace_filter is not None:
+            states.append({
+                "key": "hvac_replace_filter",
+                "value": {"type": "BOOL", "bool_value": replace_filter},
+            })
+        if water_percentage is not None:
+            try:
+                states.append({
+                    "key": "hvac_water_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(water_percentage))))},
                 })
             except (ValueError, TypeError):
                 pass
