@@ -29,6 +29,7 @@ from .const import (
     DEVICE_TYPE_VALVE,
     DEVICE_TYPE_LIGHT,
     DEVICE_TYPE_COVER,
+    DEVICE_TYPE_WATER_LEAK,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -148,6 +149,14 @@ class StateTracker:
                     watched.add(entity_id)
 
             elif device_type == DEVICE_TYPE_COVER:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                battery_entity = attrs.get("battery_entity", "")
+                if battery_entity:
+                    watched.add(battery_entity)
+
+            elif device_type == DEVICE_TYPE_WATER_LEAK:
                 entity_id = attrs.get("entity_id", "")
                 if entity_id:
                     watched.add(entity_id)
@@ -530,6 +539,42 @@ class StateTracker:
 
             payload = self._serializer.build_cover_state_payload(
                 device_id, open_set, open_state_v, open_percentage, battery
+            )
+            self._publish_status(payload)
+
+            import json as _json
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+
+        elif device_type == DEVICE_TYPE_WATER_LEAK:
+            entity_id      = attrs.get("entity_id", "")
+            battery_entity = attrs.get("battery_entity", "")
+            if changed_entity_id not in {entity_id, battery_entity}:
+                return
+
+            leak_state = self._hass.states.get(entity_id)
+            if not leak_state:
+                return
+
+            leak_detected = leak_state.state == "on"
+
+            battery = None
+            if battery_entity:
+                s = self._hass.states.get(battery_entity)
+                if s and s.state not in ("unavailable", "unknown", ""):
+                    try:
+                        battery = float(s.state)
+                    except (ValueError, TypeError):
+                        pass
+
+            _LOGGER.debug(
+                "WaterLeak %s: leak=%s battery=%s",
+                device_id, leak_detected, battery,
+            )
+
+            payload = self._serializer.build_water_leak_state_payload(
+                device_id, leak_detected, battery
             )
             self._publish_status(payload)
 

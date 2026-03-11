@@ -39,7 +39,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE
+from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
@@ -176,6 +176,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesValveView,
         SberHAEntitiesLightView,
         SberHAEntitiesCoverView,
+        SberHAEntitiesWaterLeakView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -191,6 +192,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesValveView(hass))
     hass.http.register_view(SberHAEntitiesLightView(hass))
     hass.http.register_view(SberHAEntitiesCoverView(hass))
+    hass.http.register_view(SberHAEntitiesWaterLeakView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -534,5 +536,25 @@ def _build_current_state_payload(
         return serializer.build_cover_state_payload(
             device_id, open_set, open_state_v, open_percentage, battery
         )
+
+    if device_type == "water_leak":
+        entity_id  = attrs.get("entity_id", "")
+        leak_state = hass.states.get(entity_id)
+        if not leak_state:
+            return None
+
+        leak_detected = leak_state.state == "on"
+
+        battery = None
+        battery_entity = attrs.get("battery_entity", "")
+        if battery_entity:
+            s = hass.states.get(battery_entity)
+            if s and s.state not in ("unavailable", "unknown", ""):
+                try:
+                    battery = float(s.state)
+                except (ValueError, TypeError):
+                    pass
+
+        return serializer.build_water_leak_state_payload(device_id, leak_detected, battery)
 
     return None

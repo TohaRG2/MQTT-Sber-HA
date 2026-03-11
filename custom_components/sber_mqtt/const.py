@@ -38,6 +38,7 @@ DEVICE_TYPE_VACUUM          = "vacuum_cleaner"   # Пылесос
 DEVICE_TYPE_VALVE           = "valve"            # Кран / вентиль
 DEVICE_TYPE_LIGHT           = "light"            # Лампа / осветительный прибор
 DEVICE_TYPE_COVER           = "cover"            # Рулонные шторы / жалюзи
+DEVICE_TYPE_WATER_LEAK      = "water_leak"       # Датчик протечки
 
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
@@ -49,6 +50,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_VALVE:           "Кран",
     DEVICE_TYPE_LIGHT:           "Лампа",
     DEVICE_TYPE_COVER:           "Рулонные шторы / жалюзи",
+    DEVICE_TYPE_WATER_LEAK:      "Датчик протечки",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────

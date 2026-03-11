@@ -67,6 +67,7 @@ from .const import (
     DEVICE_TYPE_VALVE,
     DEVICE_TYPE_LIGHT,
     DEVICE_TYPE_COVER,
+    DEVICE_TYPE_WATER_LEAK,
     HA_HVAC_MODE_TO_SBER,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
     SIGNAL_STRENGTH_HIGH_THRESHOLD,
@@ -140,6 +141,8 @@ class SberSerializer:
             return self._light_config(device_id, device)
         if device_type == DEVICE_TYPE_COVER:
             return self._cover_config(device_id, device)
+        if device_type == DEVICE_TYPE_WATER_LEAK:
+            return self._water_leak_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -378,6 +381,35 @@ class SberSerializer:
                 "manufacturer": MANUFACTURER,
                 "model": "Model_window_blind",
                 "category": "window_blind",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _water_leak_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для датчика протечки (sensor_water_leak).
+
+        Обязательные функции: online, water_leak_state.
+        Опциональная: battery_percentage (если задан датчик).
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "water_leak_state"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_water_leak",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_water_leak",
+                "category": "sensor_water_leak",
                 "features": features,
             },
             "model_id": "",
@@ -667,6 +699,31 @@ class SberSerializer:
             {"key": "open_set",         "value": {"type": "ENUM", "enum_value": open_set}},
             {"key": "open_state",       "value": {"type": "ENUM", "enum_value": open_state}},
             {"key": "open_percentage",  "value": {"type": "INTEGER", "integer_value": open_percentage}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_water_leak_state_payload(
+        self,
+        device_id: str,
+        leak_detected: bool,
+        battery: float | None = None,
+    ) -> str:
+        """Состояние датчика протечки.
+
+        leak_detected — True если вода обнаружена (HA state == 'on')
+        battery       — заряд батареи 0–100 (опционально)
+        """
+        states: list[dict] = [
+            {"key": "online",           "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "water_leak_state", "value": {"type": "BOOL", "bool_value": leak_detected}},
         ]
         if battery is not None:
             try:
