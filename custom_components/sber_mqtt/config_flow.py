@@ -80,10 +80,11 @@ class SberMQTTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
+    @staticmethod
     @callback
-    def async_get_options_flow(config_entry):
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry):
         """Возвращает обработчик редактирования настроек (OptionsFlow)."""
-        return SberMQTTOptionsFlow(config_entry)
+        return SberMQTTOptionsFlow()
 
 
 class SberMQTTOptionsFlow(config_entries.OptionsFlow):
@@ -92,9 +93,6 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
     Доступна через кнопку «Настройки» на странице интеграции.
     После сохранения интеграция автоматически перезагружается с новыми данными.
     """
-
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self.config_entry = config_entry
 
     async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
         """Форма с текущими значениями учётных данных."""
