@@ -111,6 +111,15 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
   <div class="toolbar">
     <div class="toolbar-l" id="cntLabel">Загрузка…</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost" onclick="doExport()" title="Скачать все устройства как JSON-файл">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>
+        Экспорт
+      </button>
+      <button class="btn btn-ghost" onclick="document.getElementById('importFile').click()" title="Загрузить устройства из JSON-файла">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M5 15h4v6h6v-6h4l-7-7-7 7zm0-10v2h14V5H5z"/></svg>
+        Импорт
+      </button>
+      <input type="file" id="importFile" accept=".json,application/json" style="display:none" onchange="doImport(this)">
       <button class="btn btn-ghost" onclick="doPublishConfig()">
         <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
         Обновить в Сбере
@@ -280,6 +289,77 @@ function renderTable() {
 }
 
 function sortBy(f){if(sortField===f)sortAsc=!sortAsc;else{sortField=f;sortAsc=true;}renderTable();}
+
+// ── Экспорт / Импорт ──────────────────────────────────────────────────────
+async function doExport(){
+  try{
+    const data = await api('/api/sber_mqtt/devices');
+    const devs = data.devices || [];
+    const json = JSON.stringify({sber_mqtt_export:true, version:1, devices:devs}, null, 2);
+    const blob = new Blob([json], {type:'application/json'});
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href=url; a.download=`sber_mqtt_${new Date().toISOString().slice(0,10)}.json`;
+    a.click(); URL.revokeObjectURL(url);
+    toast(`Экспортировано ${devs.length} устройств`);
+  }catch(e){toast('Ошибка экспорта: '+e.message,'err');}
+}
+
+async function doImport(input){
+  const file=input.files[0]; input.value='';
+  if(!file) return;
+  let parsed;
+  try{parsed=JSON.parse(await file.text());}
+  catch(e){toast('Не удалось прочитать файл','err');return;}
+  if(!parsed.sber_mqtt_export||!Array.isArray(parsed.devices)){toast('Неверный формат файла','err');return;}
+  if(!parsed.devices.length){toast('Файл не содержит устройств','err');return;}
+  showImportConfirm(parsed.devices);
+}
+
+function showImportConfirm(devs){
+  const existingIds=new Set(allDevices.map(d=>d.id));
+  const newCnt=devs.filter(d=>!existingIds.has(d.id)).length;
+  const updCnt=devs.filter(d=> existingIds.has(d.id)).length;
+  const overlay=document.createElement('div');
+  overlay.className='overlay';
+  overlay.style.zIndex='200';
+  const safeDevs=esc(JSON.stringify(devs));
+  overlay.innerHTML=`
+    <div class="modal" style="max-width:420px">
+      <div class="m-head"><span style="font-weight:700">Импорт устройств</span>
+        <button class="close" onclick="this.closest('.overlay').remove()">✕</button></div>
+      <div class="m-body" style="padding:20px">
+        <p style="margin:0 0 12px">В файле <b>${devs.length}</b> устройств:</p>
+        <ul style="margin:0 0 14px;padding-left:20px;line-height:1.9">
+          ${newCnt?`<li><b>${newCnt}</b> новых — будут добавлены</li>`:''}
+          ${updCnt?`<li><b>${updCnt}</b> совпадают по ID — будут перезаписаны</li>`:''}
+        </ul>
+        <p style="margin:0 0 20px;font-size:12px;color:var(--muted)">Устройства с другими ID не затрагиваются.</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost" onclick="this.closest('.overlay').remove()">Отмена</button>
+          <button class="btn btn-primary" id="btnConfirmImport">Импортировать</button>
+        </div>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#btnConfirmImport').addEventListener('click', async function(){
+    this.disabled=true; this.innerHTML='<div class="spin"></div>';
+    let ok=0,fail=0;
+    for(const dev of devs){
+      try{
+        await api('/api/sber_mqtt/devices',{method:'POST',body:JSON.stringify({
+          id:dev.id, name:dev.name, room:dev.room||'',
+          device_type:dev.device_type, attributes:dev.attributes||{}
+        })});
+        ok++;
+      }catch(e){fail++;}
+    }
+    overlay.remove();
+    toast(fail?`Импортировано ${ok}, ошибок ${fail}`:`Импортировано ${ok} устройств`);
+    await loadDevices();
+    if(ok) doPublishConfig();
+  });
+}
 
 async function doPublishConfig(){
   try{const r=await api('/api/sber_mqtt/publish_config',{method:'POST'});toast(`Конфигурация (${r.devices_count} устройств) отправлена`,'ok');}
@@ -569,7 +649,21 @@ function renderSPList(q){
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Не найдено</div>`;
 }
-function pickSensor(eid,name,area){if(!spField)return;wData[spField]=eid;wData[spField+'_name']=name;wData[spField+'_area']=area;spField=null;document.getElementById('wizContent').innerHTML=renderStep2Sensor();}
+function pickSensor(eid,name,area){
+  if(!spField)return;
+  wData[spField]=eid;wData[spField+'_name']=name;wData[spField+'_area']=area;
+
+  // Автоподбор батареи по device_id при выборе температуры или влажности
+  if(spField==='temperature_entity'||spField==='humidity_entity'){
+    const picked=haSensors.find(s=>s.entity_id===eid);
+    if(picked&&picked.device_id&&!wData.battery_entity){
+      const bat=haSensors.find(s=>s.device_class==='battery'&&s.device_id===picked.device_id);
+      if(bat){wData.battery_entity=bat.entity_id;wData.battery_entity_name=bat.friendly_name;wData.battery_entity_area=bat.area||'';}
+    }
+  }
+
+  spField=null;document.getElementById('wizContent').innerHTML=renderStep2Sensor();
+}
 function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[key+'_area'];document.getElementById('wizContent').innerHTML=renderStep2Sensor();}
 
 function renderStep3(){

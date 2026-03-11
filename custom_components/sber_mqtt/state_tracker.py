@@ -459,7 +459,7 @@ class StateTracker:
             is_on = light_state.state == "on"
             a     = light_state.attributes
 
-            # Определяем активные фичи из конфига устройства
+            # Определяем активные фичи из конфига устройства (сохранённые при добавлении)
             features = ["on_off"]
             for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
                 if attrs.get(feat):
@@ -473,7 +473,7 @@ class StateTracker:
                 except (ValueError, TypeError):
                     pass
 
-            hs_color          = a.get("hs_color")           # (h, s) или None
+            hs_color          = a.get("hs_color")
             # Фолбэк: если hs_color не заполнен, но есть rgb_color — конвертируем
             if hs_color is None and a.get("rgb_color") is not None:
                 try:
@@ -483,14 +483,34 @@ class StateTracker:
                     hs_color = (h * 360.0, s * 100.0)
                 except Exception:
                     pass
-            color_temp_mireds = a.get("color_temp")         # мирады или None
-            min_mireds        = a.get("min_mireds")
-            max_mireds        = a.get("max_mireds")
-            color_mode        = a.get("color_mode")
+
+            # color_temp: сначала мирады, затем фолбэк через кельвины
+            color_temp_mireds = a.get("color_temp")
+            if color_temp_mireds is None and a.get("color_temp_kelvin") is not None:
+                try:
+                    color_temp_mireds = 1_000_000 / float(a["color_temp_kelvin"])
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+
+            min_mireds = a.get("min_mireds")
+            max_mireds = a.get("max_mireds")
+            # Фолбэк min/max через kelvin-атрибуты
+            if min_mireds is None and a.get("max_color_temp_kelvin") is not None:
+                try:
+                    min_mireds = 1_000_000 / float(a["max_color_temp_kelvin"])
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+            if max_mireds is None and a.get("min_color_temp_kelvin") is not None:
+                try:
+                    max_mireds = 1_000_000 / float(a["min_color_temp_kelvin"])
+                except (ValueError, TypeError, ZeroDivisionError):
+                    pass
+            color_mode = a.get("color_mode")
 
             _LOGGER.debug(
-                "Light %s: is_on=%s brightness=%.2f color_mode=%s",
+                "Light %s: is_on=%s brightness=%.2f color_mode=%s color_temp=%s min=%s max=%s features=%s",
                 device_id, is_on, brightness_pct or 0, color_mode,
+                color_temp_mireds, min_mireds, max_mireds, features,
             )
 
             payload = self._serializer.build_light_state_payload(

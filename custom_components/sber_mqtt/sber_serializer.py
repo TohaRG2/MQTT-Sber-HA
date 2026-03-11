@@ -660,45 +660,49 @@ class SberSerializer:
             except (ValueError, TypeError):
                 pass
 
-        # Цветовая температура: мирады → промилле 0–1000
-        # min_mireds = холодный (→ 1000 в Сбере), max_mireds = тёплый (→ 0 в Сбере)
-        if "light_colour_temp" in features and color_temp_mireds is not None:
-            try:
-                mn = float(min_mireds or 153)
-                mx = float(max_mireds or 500)
-                ct = float(color_temp_mireds)
-                if mx > mn:
-                    # Нормализуем: 0 = холодный (min_mireds), 1000 = тёплый (max_mireds)
-                    sber_ct = round((ct - mn) / (mx - mn) * LIGHT_COLOUR_TEMP_MAX)
-                    sber_ct = max(LIGHT_COLOUR_TEMP_MIN, min(LIGHT_COLOUR_TEMP_MAX, sber_ct))
-                else:
-                    sber_ct = 500
-                states.append({
-                    "key": "light_colour_temp",
-                    "value": {"type": "INTEGER", "integer_value": sber_ct},
-                })
-            except (ValueError, TypeError):
-                pass
+        # Цвет и температура — взаимоисключающие. Выбор по color_mode из HA.
+        # color_mode in ('color_temp', 'white') → отправляем температуру
+        # color_mode in ('hs', 'rgb', 'xy', …)  → отправляем цвет
+        is_colour_mode = color_mode not in (None, "color_temp", "white", "onoff", "brightness")
 
-        # Цвет: HA hs_color (h 0–360, s 0–100) → Сбер HSV (h 0–360, s 0–1000, v 100–1000)
-        if "light_colour" in features and hs_color is not None:
-            try:
-                h = float(hs_color[0])
-                s = round(float(hs_color[1]) * 10)  # 0–100 → 0–1000
-                # v берём из яркости, если есть, иначе максимум
-                if brightness_pct is not None:
-                    v = round(100 + float(brightness_pct) * 900)  # 100–1000
-                    v = max(100, min(1000, v))
-                else:
-                    v = 1000
-                states.append({
-                    "key": "light_colour",
-                    "value": {"type": "COLOUR", "colour_value": {"h": round(h), "s": s, "v": v}},
-                })
-            except (ValueError, TypeError):
-                pass
+        if not is_colour_mode:
+            # Режим белого/температурного света → light_colour_temp
+            if "light_colour_temp" in features and color_temp_mireds is not None:
+                try:
+                    mn = float(min_mireds or 153)
+                    mx = float(max_mireds or 500)
+                    ct = float(color_temp_mireds)
+                    if mx > mn:
+                        # Сбер: 0 = тёплый (max_mireds), 1000 = холодный (min_mireds)
+                        sber_ct = round((1.0 - (ct - mn) / (mx - mn)) * LIGHT_COLOUR_TEMP_MAX)
+                        sber_ct = max(LIGHT_COLOUR_TEMP_MIN, min(LIGHT_COLOUR_TEMP_MAX, sber_ct))
+                    else:
+                        sber_ct = 500
+                    states.append({
+                        "key": "light_colour_temp",
+                        "value": {"type": "INTEGER", "integer_value": sber_ct},
+                    })
+                except (ValueError, TypeError):
+                    pass
+        else:
+            # Режим цвета → light_colour (и light_mode если фича включена)
+            if "light_colour" in features and hs_color is not None:
+                try:
+                    h = float(hs_color[0])
+                    s = round(float(hs_color[1]) * 10)  # 0–100 → 0–1000
+                    if brightness_pct is not None:
+                        v = round(100 + float(brightness_pct) * 900)  # 100–1000
+                        v = max(100, min(1000, v))
+                    else:
+                        v = 1000
+                    states.append({
+                        "key": "light_colour",
+                        "value": {"type": "COLOUR", "colour_value": {"h": round(h), "s": s, "v": v}},
+                    })
+                except (ValueError, TypeError):
+                    pass
 
-        # Режим: colour / white
+        # Режим: colour / white — отправляем только если фича активна
         if "light_mode" in features and color_mode is not None:
             sber_mode = HA_COLOR_MODE_TO_SBER_LIGHT_MODE.get(color_mode, "white")
             states.append({

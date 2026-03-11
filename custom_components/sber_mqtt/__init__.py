@@ -497,15 +497,35 @@ def _build_current_state_payload(
             except Exception:
                 pass
 
+        color_temp_mireds = a.get("color_temp")
+        if color_temp_mireds is None and a.get("color_temp_kelvin") is not None:
+            try:
+                color_temp_mireds = 1_000_000 / float(a["color_temp_kelvin"])
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+
+        min_mireds = a.get("min_mireds")
+        max_mireds = a.get("max_mireds")
+        if min_mireds is None and a.get("max_color_temp_kelvin") is not None:
+            try:
+                min_mireds = 1_000_000 / float(a["max_color_temp_kelvin"])
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+        if max_mireds is None and a.get("min_color_temp_kelvin") is not None:
+            try:
+                max_mireds = 1_000_000 / float(a["min_color_temp_kelvin"])
+            except (ValueError, TypeError, ZeroDivisionError):
+                pass
+
         return serializer.build_light_state_payload(
             device_id=device_id,
             is_on=is_on,
             features=features,
             brightness_pct=brightness_pct,
             hs_color=hs_color,
-            color_temp_mireds=a.get("color_temp"),
-            min_mireds=a.get("min_mireds"),
-            max_mireds=a.get("max_mireds"),
+            color_temp_mireds=color_temp_mireds,
+            min_mireds=min_mireds,
+            max_mireds=max_mireds,
             color_mode=a.get("color_mode"),
         )
 

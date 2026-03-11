@@ -307,6 +307,7 @@ class HACommandHandler:
 
         service_data: dict = {"entity_id": entity_id}
         service = "turn_on"
+        requested_light_mode: str | None = None
 
         for state in states:
             key = state.get("key")
@@ -341,51 +342,96 @@ class HACommandHandler:
 
             elif key == "light_colour":
                 # Сбер HSV (h 0–360, s 0–1000, v 100–1000) → HA hs_color (h 0–360, s 0–100)
-                # Яркость берём из v, т.к. Сбер может не посылать отдельный light_brightness
+                # Цвет и температура взаимоисключающие — убираем температуру если была
                 try:
-                    from .const import LIGHT_BRIGHTNESS_MIN, LIGHT_BRIGHTNESS_MAX
                     cv = val.get("colour_value", {})
                     h  = float(cv.get("h", 0))
                     s  = float(cv.get("s", 1000)) / 10.0  # 0–1000 → 0–100
+                    service_data.pop("color_temp_kelvin", None)
+                    service_data.pop("color_temp", None)
                     service_data["hs_color"] = (h, s)
                     # v: 100–1000 → HA brightness 0–255
                     v = cv.get("v")
                     if v is not None:
                         v_norm = (float(v) - 100) / 900.0   # 100–1000 → 0.0–1.0
-                        ha_brightness = round(max(0.0, min(1.0, v_norm)) * 255)
-                        service_data["brightness"] = ha_brightness
+                        service_data["brightness"] = round(max(0.0, min(1.0, v_norm)) * 255)
                 except (ValueError, TypeError):
                     pass
 
             elif key == "light_colour_temp":
-                # Сбер 0–1000 (промилле) → HA мирады
+                # Сбер 0–1000: 0 = тёплый (max_mireds), 1000 = холодный (min_mireds) — инвертировано.
+                # Цвет и температура взаимоисключающие — убираем цвет если был.
+                # Используем color_temp_kelvin если лампа его поддерживает, иначе color_temp (мирады).
                 try:
-                    from homeassistant.helpers.entity_registry import async_get as er_get
                     sber_ct = int(val.get("integer_value", 500))
-                    # Получаем диапазон мирад из атрибутов текущего состояния
                     hass_state = self._hass.states.get(entity_id)
-                    if hass_state:
-                        mn = float(hass_state.attributes.get("min_mireds", 153))
-                        mx = float(hass_state.attributes.get("max_mireds", 500))
+                    a = hass_state.attributes if hass_state else {}
+
+                    service_data.pop("hs_color", None)
+                    service_data.pop("rgb_color", None)
+                    service_data.pop("xy_color", None)
+
+                    min_k = a.get("min_color_temp_kelvin")
+                    max_k = a.get("max_color_temp_kelvin")
+
+                    if min_k is not None and max_k is not None:
+                        mn_k = float(min_k)  # тёплый
+                        mx_k = float(max_k)  # холодный
+                        kelvin = round(mn_k + (sber_ct / 1000.0) * (mx_k - mn_k))
+                        kelvin = max(int(mn_k), min(int(mx_k), kelvin))
+                        _LOGGER.info(
+                            "Лампа %s: light.turn_on color_temp_kelvin=%d (sber=%d)",
+                            device.get("id"), kelvin, sber_ct,
+                        )
+                        service_data["color_temp_kelvin"] = kelvin
                     else:
-                        mn, mx = 153.0, 500.0
-                    # 0 промилле = холодный (min_mireds), 1000 = тёплый (max_mireds)
-                    mireds = round(mn + (sber_ct / 1000.0) * (mx - mn))
-                    service_data["color_temp"] = max(int(mn), min(int(mx), mireds))
+                        mn = float(a.get("min_mireds", 153))
+                        mx = float(a.get("max_mireds", 500))
+                        mireds = round(mx - (sber_ct / 1000.0) * (mx - mn))
+                        mireds = max(int(mn), min(int(mx), mireds))
+                        _LOGGER.info(
+                            "Лампа %s: light.turn_on color_temp=%d mireds (sber=%d)",
+                            device.get("id"), mireds, sber_ct,
+                        )
+                        service_data["color_temp"] = mireds
                 except (ValueError, TypeError):
                     pass
 
             elif key == "light_mode":
-                mode = val.get("enum_value", "white")
-                # При смене режима просто меняем color_mode
-                if mode == "colour":
-                    # Переключаем на hs, если нет цвета в service_data
-                    if "hs_color" not in service_data:
-                        service_data["color_mode"] = "hs"
-                else:
-                    # Белый режим — переключаем на color_temp или white
-                    if "color_temp" not in service_data:
-                        service_data["color_mode"] = "color_temp"
+                # light_mode только переключает режим если нет явного цвета/температуры в команде.
+                # Сохраняем запрошенный режим — применим после цикла если нужно.
+                requested_light_mode = val.get("enum_value", "white")
+
+        # Если пришёл только light_mode без явного цвета/температуры —
+        # переключаем лампу в нужный режим минимальной командой
+        colour_keys  = {"hs_color", "rgb_color", "xy_color"}
+        temp_keys    = {"color_temp_kelvin", "color_temp"}
+        has_colour   = bool(colour_keys & service_data.keys())
+        has_temp     = bool(temp_keys   & service_data.keys())
+        if requested_light_mode and not has_colour and not has_temp:
+            if requested_light_mode == "colour":
+                # Переключаем в цветовой режим — отправляем текущий hs_color лампы
+                hass_state = self._hass.states.get(entity_id)
+                if hass_state:
+                    hs = hass_state.attributes.get("hs_color")
+                    if hs:
+                        service_data["hs_color"] = (float(hs[0]), float(hs[1]))
+            else:
+                # Переключаем в белый/температурный режим
+                hass_state = self._hass.states.get(entity_id)
+                if hass_state:
+                    a = hass_state.attributes
+                    min_k = a.get("min_color_temp_kelvin")
+                    max_k = a.get("max_color_temp_kelvin")
+                    if min_k and max_k:
+                        # Берём текущую температуру или нейтральную
+                        k = a.get("color_temp_kelvin") or round((float(min_k) + float(max_k)) / 2)
+                        service_data["color_temp_kelvin"] = int(k)
+                    else:
+                        mn = float(a.get("min_mireds", 153))
+                        mx = float(a.get("max_mireds", 500))
+                        ct = a.get("color_temp") or round((mn + mx) / 2)
+                        service_data["color_temp"] = int(ct)
 
         _LOGGER.info(
             "Лампа %s: %s.%s %s",
