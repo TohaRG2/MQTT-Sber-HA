@@ -73,6 +73,8 @@ input:focus,select:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(3
 .p-list{max-height:260px;overflow-y:auto}
 .p-item{display:grid;grid-template-columns:90px 110px 1fr 150px;gap:6px;padding:8px 11px;cursor:pointer;border-bottom:1px solid var(--border);align-items:center;transition:background .1s}
 .p-item:last-child{border-bottom:none}.p-item:hover,.p-item.sel{background:var(--primary-lt)}
+.p-item.used{background:#fff8e1}.p-item.used:hover,.p-item.used.sel{background:#fff3cd}
+.p-used-badge{font-size:9px;color:#b45309;background:#fef3c7;border:1px solid #fde68a;border-radius:10px;padding:1px 6px;white-space:nowrap;margin-left:4px;vertical-align:middle}
 .dom-badge{background:#e3f2fd;color:#1565c0;padding:2px 7px;border-radius:20px;font-size:10px;font-weight:500;text-align:center;white-space:nowrap}
 .p-area{font-size:11px;color:var(--muted)}.p-name{font-size:12px;font-weight:500}
 .p-eid{font-size:10px;font-family:monospace;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -221,6 +223,25 @@ const STEPS = {
 let devices=[], sortField='name', sortAsc=true, delId=null;
 let wStep=1, wType=null, wData={}, haRelay=[], haSensors=[], haSocket=[], sFilter='', spField=null;
 
+// Множество entity_id, уже используемых в добавленных устройствах
+let usedEntities=new Set();
+function refreshUsedEntities(){
+  usedEntities=new Set();
+  const attrKeys=['entity_id','power_entity','current_entity','voltage_entity',
+    'temperature_entity','humidity_entity','battery_entity','signal_entity',
+    'water_percentage_entity','replace_filter_entity'];
+  for(const d of devices){
+    for(const k of attrKeys){
+      const v=d.attributes?.[k];
+      if(v) usedEntities.add(v);
+    }
+  }
+}
+function isUsed(eid){return usedEntities.has(eid);}
+function usedCls(eid){return isUsed(eid)?'used':'';}
+function usedBadge(eid){return isUsed(eid)?'<span class="p-used-badge">уже добавлено</span>':'';}
+
+
 async function loadStatus() {
   try {
     const d = await api('/api/sber_mqtt/status');
@@ -235,6 +256,7 @@ async function loadDevices() {
   try {
     const d = await api('/api/sber_mqtt/devices');
     devices=d.devices||[];
+    refreshUsedEntities();
     renderTable();
     document.getElementById('cntLabel').textContent=`Устройств: ${devices.length}`;
   } catch(e) {
@@ -528,7 +550,7 @@ function renderRelaySensorList(q){
   let list=haSensors.filter(s=>s.device_class===_relaySensorPickerDc);
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('relaySensorList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_relaySensorPickerKey]===s.entity_id?'sel':''}" onclick="pickRelaySensor('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_relaySensorPickerKey]===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickRelaySensor('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет сенсоров класса «${_relaySensorPickerDc}»</div>`;
 }
@@ -541,9 +563,9 @@ function clearRelaySensor(key){delete wData[key];document.getElementById('wizCon
 function relayItems(){
   const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickEntity(eid,name,area,deviceId){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -563,9 +585,9 @@ async function fetchSocket(){
 function socketItems(){
   const list=haSocket.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickSocketEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickSocketEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickSocketEntity(eid,name,area,deviceId){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -593,7 +615,7 @@ function renderSocketSensorList(q){
   let list=haSensors.filter(s=>s.device_class===_socketSensorPickerDc);
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('socketSensorList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_socketSensorPickerKey]===s.entity_id?'sel':''}" onclick="pickSocketSensor('${esc(s.entity_id)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_socketSensorPickerKey]===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickSocketSensor('${esc(s.entity_id)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет сенсоров класса «${_socketSensorPickerDc}»</div>`;
 }
@@ -667,9 +689,9 @@ function renderStep2ScenarioButton(){
 function scenarioBtnItems(){
   const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickScenarioBtnEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickScenarioBtnEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickScenarioBtnEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2ScenarioButton();}
 
@@ -703,11 +725,13 @@ function renderStep2Sensor(){
 function openSP(key){spField=key;document.getElementById('spWrap').style.display='';document.getElementById('spInput').value='';renderSPList('');document.getElementById('spWrap').scrollIntoView({behavior:'smooth'});}
 function renderSPList(q){
   q=(q||'').toLowerCase();
-  const clsMap={temperature_entity:'temperature',humidity_entity:'humidity',battery_entity:'battery',signal_entity:'signal_strength'};
-  let list=clsMap[spField]?haSensors.filter(s=>s.device_class===clsMap[spField]):haSensors;
+  const clsMap={temperature_entity:'temperature',battery_entity:'battery',signal_entity:'signal_strength'};
+  let list=spField==='humidity_entity'
+    ? haSensors.filter(s=>s.device_class==='humidity'||s.device_class==='moisture')
+    : (clsMap[spField]?haSensors.filter(s=>s.device_class===clsMap[spField]):haSensors);
   if(q)list=list.filter(s=>(s.area+s.device_class+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('spList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[spField]===s.entity_id?'sel':''}" onclick="pickSensor('${esc(s.entity_id)}','${esc(s.friendly_name)}','${esc(s.area)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[spField]===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickSensor('${esc(s.entity_id)}','${esc(s.friendly_name)}','${esc(s.area)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Не найдено</div>`;
 }
@@ -807,7 +831,7 @@ async function submitDevice(){
 }
 
 async function fetchRelay(){if(haRelay.length)return;try{haRelay=(await api('/api/sber_mqtt/ha_entities/relay')).entities||[];}catch(e){toast('Ошибка загрузки сущностей','err');}}
-async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,battery,signal_strength,power,current,voltage')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
+async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,moisture,battery,signal_strength,power,current,voltage')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
 
 let haClimate=[];
 async function fetchClimate(){if(haClimate.length)return;try{haClimate=(await api('/api/sber_mqtt/ha_entities/climate')).entities||[];}catch(e){toast('Ошибка загрузки климата','err');}}
@@ -851,9 +875,9 @@ function renderStep2HvacAc(){
 function hvacItems(){
   const list=haClimate.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickHvacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickHvacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
     <span class="dom-badge">climate</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickHvacEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
 function openHvacTempPicker(){const el=document.getElementById('hvacTempPicker');el.style.display='';document.getElementById('hvacTempInput').value='';renderHvacTempList('');el.scrollIntoView({behavior:'smooth'});}
@@ -862,7 +886,7 @@ function renderHvacTempList(q){
   let list=haSensors.filter(s=>s.device_class==='temperature');
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('hvacTempList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.temperature_entity===s.entity_id?'sel':''}" onclick="pickHvacTemp('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.temperature_entity===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickHvacTemp('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков температуры</div>`;
 }
@@ -918,9 +942,9 @@ function renderStep2Vacuum(){
 function vacItems(){
   const list=haVacuum.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет пылесосов</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickVacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickVacEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">vacuum</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 
 function pickVacEntity(eid, name, area, deviceId){
@@ -948,7 +972,7 @@ function renderVacBatList(q){
   let list=haSensors.filter(s=>s.device_class==='battery');
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('vacBatList'); if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''}" onclick="pickVacBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickVacBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков батареи</div>`;
 }
@@ -982,9 +1006,9 @@ function renderStep2Valve(){
 function valveItems(){
   const list=haValve.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет подходящих сущностей</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickValveEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickValveEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickValveEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2Valve();}
 
@@ -1029,9 +1053,9 @@ function renderStep2Light(){
 function lightItems(){
   const list=haLight.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет ламп</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickLightEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickLightEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
     <span class="dom-badge">light</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 
 function renderLightFeatures(entity){
@@ -1121,9 +1145,9 @@ function renderStep2Cover(){
 function coverItems(){
   const list=haCover.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет сущностей cover</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickCoverEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickCoverEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">cover</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickCoverEntity(eid,name,area,deviceId){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -1145,7 +1169,7 @@ function renderCoverBatList(q){
   let list=haSensors.filter(s=>s.device_class==='battery');
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('coverBatList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''}" onclick="pickCoverBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickCoverBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков батареи</div>`;
 }
@@ -1199,9 +1223,9 @@ function renderStep2WaterLeak(){
 function wlItems(){
   const list=haWaterLeak.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет датчиков с device_class: moisture</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickWlEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickWlEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">moisture</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickWlEntity(eid,name,area,deviceId){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -1224,7 +1248,7 @@ function renderWlBatList(q){
   let list=haSensors.filter(s=>s.device_class==='battery');
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('wlBatList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''}" onclick="pickWlBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickWlBattery('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
     <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков батареи</div>`;
 }
@@ -1291,9 +1315,9 @@ function renderStep2Humidifier(){
 function humItems(){
   const list=haHumidifier.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
   if(!list.length)return`<div class="p-empty">Нет увлажнителей (домен humidifier)</div>`;
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickHumEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickHumEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
     <span class="dom-badge">humidifier</span><span class="p-area">${esc(e.area||'—')}</span>
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickHumEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -1313,7 +1337,7 @@ function renderHumSensorList(q){
   let list=haSensors;
   if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('humSensorList');if(!el)return;
-  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_humSensorPickerKey]===s.entity_id?'sel':''}" onclick="pickHumSensor('${esc(s.entity_id)}')">
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[_humSensorPickerKey]===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickHumSensor('${esc(s.entity_id)}')">
     <span class="dom-badge">${esc(s.device_class||'sensor')}</span><span class="p-area">${esc(s.area||'—')}</span>
     <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Ничего не найдено</div>`;
 }
