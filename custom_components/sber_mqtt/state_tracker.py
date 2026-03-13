@@ -44,6 +44,9 @@ from .const import (
     HA_COVER_STATE_TO_SBER_OPEN_SET,
     HA_COVER_STATE_TO_SBER_OPEN_STATE,
     HA_MODE_TO_SBER_AIR_FLOW,
+    HA_AC_FAN_MODE_TO_SBER,
+    HA_AC_PRESET_TO_SBER_AIR_FLOW,
+    HA_AC_SWING_TO_SBER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -286,7 +289,6 @@ class StateTracker:
             )
 
         elif device_type == DEVICE_TYPE_HVAC_AC:
-            # Отслеживаем и climate-сущность, и опциональный датчик температуры
             climate_entity = attrs.get("entity_id", "")
             temp_entity    = attrs.get("temperature_entity", "")
             if changed_entity_id not in {climate_entity, temp_entity}:
@@ -319,13 +321,33 @@ class StateTracker:
                     except (ValueError, TypeError):
                         pass
 
+            # Скорость вентилятора: preset_mode приоритетнее fan_mode
+            air_flow_power: str | None = None
+            if climate_state.attributes.get("fan_modes"):
+                preset = climate_state.attributes.get("preset_mode", "none")
+                if preset and preset != "none":
+                    air_flow_power = HA_AC_PRESET_TO_SBER_AIR_FLOW.get(preset)
+                if air_flow_power is None:
+                    fan_mode = climate_state.attributes.get("fan_mode", "")
+                    air_flow_power = HA_AC_FAN_MODE_TO_SBER.get(fan_mode)
+
+            # Направление потока воздуха — из swing_mode
+            air_flow_direction: str | None = None
+            if climate_state.attributes.get("swing_modes"):
+                swing = climate_state.attributes.get("swing_mode", "")
+                if swing:
+                    air_flow_direction = HA_AC_SWING_TO_SBER.get(swing)
+
             _LOGGER.debug(
-                "HVAC %s: is_on=%s target=%.1f mode=%s current_temp=%s",
+                "HVAC %s: is_on=%s target=%.1f mode=%s current_temp=%s "
+                "air_flow_power=%s air_flow_direction=%s",
                 device_id, is_on, target_temp or 0, work_mode, current_temp,
+                air_flow_power, air_flow_direction,
             )
 
             payload = self._serializer.build_hvac_ac_state_payload(
-                device_id, is_on, target_temp, work_mode, current_temp
+                device_id, is_on, target_temp, work_mode, current_temp,
+                air_flow_power, air_flow_direction,
             )
             self._publish_status(payload)
 

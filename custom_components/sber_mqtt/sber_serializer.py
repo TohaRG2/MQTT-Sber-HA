@@ -238,26 +238,113 @@ class SberSerializer:
     def _hvac_ac_config(self, device_id: str, device: dict) -> dict:
         """Конфиг для кондиционера (hvac_ac).
 
-        Обязательные функции: online, on_off, hvac_temp_set.
-        Опциональные: hvac_work_mode, temperature (если задан датчик текущей температуры).
+        Обязательные функции: online, on_off, hvac_temp_set, hvac_work_mode.
+        hvac_air_flow_power — если кондиционер поддерживает fan_modes.
+        temperature — если задан датчик текущей температуры.
+        allowed_values — ограничивает допустимые значения hvac_work_mode, hvac_air_flow_power
+          и диапазон hvac_temp_set на основе атрибутов климат-сущности HA.
         """
+        from .const import HA_HVAC_MODE_TO_SBER, HA_AC_FAN_MODE_TO_SBER, HA_AC_PRESET_TO_SBER_AIR_FLOW
+
         attrs = device.get("attributes", {})
         features = ["online", "on_off", "hvac_temp_set", "hvac_work_mode"]
+        if attrs.get("fan_modes"):
+            features.append("hvac_air_flow_power")
+        if attrs.get("swing_modes"):
+            features.append("hvac_air_flow_direction")
         if attrs.get("temperature_entity"):
             features.append("temperature")
+
+        # ── allowed_values ────────────────────────────────────────────────
+        allowed_values: dict = {}
+
+        # hvac_work_mode — только режимы, реально поддерживаемые устройством
+        ha_modes = attrs.get("hvac_modes", [])
+        sber_work_modes = [
+            HA_HVAC_MODE_TO_SBER[m] for m in ha_modes
+            if m != "off" and m in HA_HVAC_MODE_TO_SBER
+        ]
+        # убираем дубли, сохраняем порядок
+        seen: set = set()
+        sber_work_modes = [m for m in sber_work_modes if not (m in seen or seen.add(m))]
+        if sber_work_modes:
+            allowed_values["hvac_work_mode"] = {
+                "type": "ENUM",
+                "enum_values": {"values": sber_work_modes},
+            }
+
+        # hvac_temp_set — диапазон и шаг из атрибутов кондиционера
+        min_temp  = attrs.get("min_temp")
+        max_temp  = attrs.get("max_temp")
+        temp_step = attrs.get("target_temp_step")
+        if min_temp is not None and max_temp is not None and temp_step is not None:
+            try:
+                allowed_values["hvac_temp_set"] = {
+                    "type": "INTEGER",
+                    "integer_values": {
+                        "min":  str(round(float(min_temp))),
+                        "max":  str(round(float(max_temp))),
+                        "step": str(round(float(temp_step))),
+                    },
+                }
+            except (ValueError, TypeError):
+                pass
+
+        # hvac_air_flow_power — только значения, реально доступные на устройстве
+        if attrs.get("fan_modes"):
+            sber_flow_values: list[str] = []
+            seen_flow: set = set()
+            # fan_modes → прямые значения скорости
+            for fm in attrs["fan_modes"]:
+                sv = HA_AC_FAN_MODE_TO_SBER.get(fm)
+                if sv and sv not in seen_flow:
+                    sber_flow_values.append(sv)
+                    seen_flow.add(sv)
+            # preset_modes → turbo / quiet
+            for pm, sv in HA_AC_PRESET_TO_SBER_AIR_FLOW.items():
+                if sv not in seen_flow:
+                    preset_modes = attrs.get("preset_modes", [])
+                    if pm in preset_modes:
+                        sber_flow_values.append(sv)
+                        seen_flow.add(sv)
+            if sber_flow_values:
+                allowed_values["hvac_air_flow_power"] = {
+                    "type": "ENUM",
+                    "enum_values": {"values": sber_flow_values},
+                }
+
+        # hvac_air_flow_direction — только направления, реально поддерживаемые устройством
+        if attrs.get("swing_modes"):
+            from .const import HA_AC_SWING_TO_SBER
+            sber_dir_values: list[str] = []
+            seen_dir: set = set()
+            for sm in attrs["swing_modes"]:
+                sv = HA_AC_SWING_TO_SBER.get(sm)
+                if sv and sv not in seen_dir:
+                    sber_dir_values.append(sv)
+                    seen_dir.add(sv)
+            if sber_dir_values:
+                allowed_values["hvac_air_flow_direction"] = {
+                    "type": "ENUM",
+                    "enum_values": {"values": sber_dir_values},
+                }
+
+        model: dict = {
+            "id": "ID_hvac_ac",
+            "manufacturer": MANUFACTURER,
+            "model": "Model_hvac_ac",
+            "category": DEVICE_TYPE_HVAC_AC,
+            "features": features,
+        }
+        if allowed_values:
+            model["allowed_values"] = allowed_values
 
         entry = {
             "id": device_id,
             "name": device.get("name", device_id),
             "hw_version": HW_VERSION,
             "sw_version": SW_VERSION,
-            "model": {
-                "id": "ID_hvac_ac",
-                "manufacturer": MANUFACTURER,
-                "model": "Model_hvac_ac",
-                "category": DEVICE_TYPE_HVAC_AC,
-                "features": features,
-            },
+            "model": model,
             "model_id": "",
         }
         if device.get("room"):
@@ -554,13 +641,17 @@ class SberSerializer:
         target_temp: float | None,
         work_mode: str | None,
         current_temp: float | None = None,
+        air_flow_power: str | None = None,
+        air_flow_direction: str | None = None,
     ) -> str:
         """Состояние кондиционера.
 
-        is_on         — включён/выключён
-        target_temp   — целевая температура (hvac_temp_set), градусы °C
-        work_mode     — режим работы в терминах Сбера: cooling/heating/ventilation/…
-        current_temp  — текущая температура (temperature), если задан датчик; × 10
+        is_on               — включён/выключен
+        target_temp         — целевая температура (hvac_temp_set), °C
+        work_mode           — режим работы в терминах Сбера: cooling/heating/ventilation/…
+        current_temp        — текущая температура (temperature), если доступна; × 10
+        air_flow_power      — скорость вентилятора: auto/low/medium/high/turbo/quiet
+        air_flow_direction  — направление потока: no/vertical/horizontal/rotation/swing/auto
         """
         states: list[dict] = [
             {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
@@ -591,6 +682,18 @@ class SberSerializer:
                 })
             except (ValueError, TypeError):
                 pass
+
+        if air_flow_power:
+            states.append({
+                "key": "hvac_air_flow_power",
+                "value": {"type": "ENUM", "enum_value": air_flow_power},
+            })
+
+        if air_flow_direction:
+            states.append({
+                "key": "hvac_air_flow_direction",
+                "value": {"type": "ENUM", "enum_value": air_flow_direction},
+            })
 
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 

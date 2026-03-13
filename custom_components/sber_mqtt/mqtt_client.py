@@ -223,20 +223,24 @@ class SberMQTTClient:
 
     def _on_message_fallback(self, client, userdata, message) -> None:
         """Обработчик для топиков без явного колбэка (на случай новых топиков от Сбера)."""
+        payload_str = message.payload.decode("utf-8", errors="replace")
         _LOGGER.info(
             "MQTT ← необработанный топик: %s | payload: %s",
-            message.topic, message.payload[:500],
+            message.topic, payload_str[:500],
         )
+        self._devtools_hook(message.topic, payload_str)
 
     def _handle_commands(self, client, userdata, message) -> None:
         """Обрабатывает команды управления устройствами от Сбера.
 
         Формат: {"devices": {"device_id": {"states": [{"key": "on_off", ...}]}}}
         """
+        payload_str = message.payload.decode("utf-8", errors="replace")
+        self._devtools_hook(message.topic, payload_str)
         try:
-            data = json.loads(message.payload)
+            data = json.loads(payload_str)
         except json.JSONDecodeError:
-            _LOGGER.error("MQTT ← команды: невалидный JSON: %s", message.payload[:200])
+            _LOGGER.error("MQTT ← команды: невалидный JSON: %s", payload_str[:200])
             return
 
         _LOGGER.info("MQTT ← команды: %s", json.dumps(data, ensure_ascii=False))
@@ -253,8 +257,10 @@ class SberMQTTClient:
         Формат: {"devices": ["device_id1", "device_id2"]}
         Пустой список означает запрос состояний всех устройств.
         """
+        payload_str = message.payload.decode("utf-8", errors="replace")
+        self._devtools_hook(message.topic, payload_str)
         try:
-            data = json.loads(message.payload)
+            data = json.loads(payload_str)
             device_ids = data.get("devices", [])
         except Exception:
             device_ids = []
@@ -263,6 +269,8 @@ class SberMQTTClient:
 
     def _handle_config_request(self, client, userdata, message) -> None:
         """Сбер запрашивает полную конфигурацию устройств."""
+        payload_str = message.payload.decode("utf-8", errors="replace")
+        self._devtools_hook(message.topic, payload_str)
         _LOGGER.info("MQTT ← запрос конфигурации от Сбера")
         self._schedule(self._on_config_request())
 
@@ -272,18 +280,31 @@ class SberMQTTClient:
         Приходит после успешной регистрации устройства через config payload.
         Формат: {"device_id": "...", "home": "Мой дом", "room": "Гостиная"}
         """
+        payload_str = message.payload.decode("utf-8", errors="replace")
+        self._devtools_hook(message.topic, payload_str)
         try:
-            data = json.loads(message.payload)
+            data = json.loads(payload_str)
             _LOGGER.info(
                 "Сбер: устройство '%s' добавлено в дом='%s' комната='%s'",
                 data.get("device_id"), data.get("home"), data.get("room"),
             )
         except Exception:
-            _LOGGER.info("MQTT ← change_group_device_request: %s", message.payload)
+            _LOGGER.info("MQTT ← change_group_device_request: %s", payload_str)
 
     def _handle_errors(self, client, userdata, message) -> None:
         """Ошибки от брокера Сбера (невалидный payload, неизвестные поля и т.д.)."""
-        _LOGGER.error("MQTT ← ошибка от Сбера: %s", message.payload)
+        payload_str = message.payload.decode("utf-8", errors="replace")
+        self._devtools_hook(message.topic, payload_str)
+        _LOGGER.error("MQTT ← ошибка от Сбера: %s", payload_str)
+
+    @staticmethod
+    def _devtools_hook(topic: str, payload_str: str) -> None:
+        """Отправляет входящее сообщение в буфер DevTools (без исключений)."""
+        try:
+            from .api_views import devtools_on_command
+            devtools_on_command(topic, payload_str)
+        except Exception:
+            pass
 
 
 # ── Проверка подключения (используется в Config Flow) ─────────────────────

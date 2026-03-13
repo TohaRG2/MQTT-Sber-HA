@@ -184,6 +184,13 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberPanelView,
         SberDeviceTypesView,
         SberConnectionStatusView,
+        # Dev Tools
+        SberDevConfigRawView,
+        SberDevStateView,
+        SberDevStateRawView,
+        SberDevCommandsHistoryView,
+        SberDevCommandsStreamView,
+        SberDevPanelView,
     )
     hass.http.register_view(SberDevicesView(hass))
     hass.http.register_view(SberDeviceView(hass))
@@ -202,6 +209,13 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberPanelView(hass))
     hass.http.register_view(SberDeviceTypesView(hass))
     hass.http.register_view(SberConnectionStatusView(hass))
+    # Dev Tools
+    hass.http.register_view(SberDevConfigRawView(hass))
+    hass.http.register_view(SberDevStateView(hass))
+    hass.http.register_view(SberDevStateRawView(hass))
+    hass.http.register_view(SberDevCommandsHistoryView(hass))
+    hass.http.register_view(SberDevCommandsStreamView(hass))
+    hass.http.register_view(SberDevPanelView(hass))
 
 
 # ------------------------------------------------------------------ #
@@ -400,8 +414,30 @@ def _build_current_state_payload(
                 except (ValueError, TypeError):
                     pass
 
+        # Скорость вентилятора: preset_mode приоритетнее fan_mode
+        # preset boost → turbo, sleep → quiet; fan_mode auto/low/medium/high → напрямую
+        # Читаем напрямую из атрибутов climate — не зависим от наличия fan_modes в attrs устройства
+        air_flow_power: str | None = None
+        if climate_state.attributes.get("fan_modes"):
+            from .const import HA_AC_PRESET_TO_SBER_AIR_FLOW, HA_AC_FAN_MODE_TO_SBER
+            preset = climate_state.attributes.get("preset_mode", "none")
+            if preset and preset != "none":
+                air_flow_power = HA_AC_PRESET_TO_SBER_AIR_FLOW.get(preset)
+            if air_flow_power is None:
+                fan_mode = climate_state.attributes.get("fan_mode", "")
+                air_flow_power = HA_AC_FAN_MODE_TO_SBER.get(fan_mode)
+
+        # Направление потока воздуха — из swing_mode климат-сущности
+        air_flow_direction: str | None = None
+        if climate_state.attributes.get("swing_modes"):
+            from .const import HA_AC_SWING_TO_SBER
+            swing = climate_state.attributes.get("swing_mode", "")
+            if swing:
+                air_flow_direction = HA_AC_SWING_TO_SBER.get(swing)
+
         return serializer.build_hvac_ac_state_payload(
-            device_id, is_on, target_temp, work_mode, current_temp
+            device_id, is_on, target_temp, work_mode, current_temp,
+            air_flow_power, air_flow_direction
         )
 
     if device_type == "vacuum_cleaner":

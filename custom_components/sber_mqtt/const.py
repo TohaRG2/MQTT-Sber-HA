@@ -55,6 +55,57 @@ SBER_AIR_FLOW_TO_HA_MODE: dict[str, str] = {
 }
 HA_MODE_TO_SBER_AIR_FLOW: dict[str, str] = {v: k for k, v in SBER_AIR_FLOW_TO_HA_MODE.items()}
 
+# ── Маппинги вентилятора кондиционера (hvac_ac) ───────────────────────────
+
+# fan_mode кондиционера HA → hvac_air_flow_power Сбера
+# Стандартные значения; у конкретного устройства могут быть и другие fan_modes
+HA_AC_FAN_MODE_TO_SBER: dict[str, str] = {
+    "auto":   "auto",
+    "low":    "low",
+    "medium": "medium",
+    "high":   "high",
+}
+
+# preset_mode кондиционера HA → hvac_air_flow_power Сбера
+# preset перекрывает fan_mode: boost → turbo, sleep → quiet
+HA_AC_PRESET_TO_SBER_AIR_FLOW: dict[str, str] = {
+    "boost": "turbo",
+    "sleep": "quiet",
+}
+
+# hvac_air_flow_power Сбера → (fan_mode, preset_mode) в HA
+# turbo/quiet меняют только preset_mode; auto/low/medium/high — только fan_mode
+SBER_AIR_FLOW_TO_HA_AC: dict[str, tuple] = {
+    "auto":   ("auto",   "none"),
+    "low":    ("low",    "none"),
+    "medium": ("medium", "none"),
+    "high":   ("high",   "none"),
+    "turbo":  (None,     "boost"),
+    "quiet":  (None,     "sleep"),
+}
+
+# ── Маппинги направления потока воздуха кондиционера (hvac_ac) ───────────
+
+# swing_mode кондиционера HA → hvac_air_flow_direction Сбера
+HA_AC_SWING_TO_SBER: dict[str, str] = {
+    "off":        "no",
+    "vertical":   "vertical",
+    "horizontal": "horizontal",
+    "both":       "rotation",
+    "swing":      "swing",      # некоторые устройства используют "swing" вместо "vertical"
+    "auto":       "auto",
+}
+
+# hvac_air_flow_direction Сбера → swing_mode HA
+SBER_AIR_FLOW_DIR_TO_HA: dict[str, str] = {
+    "no":         "off",
+    "vertical":   "vertical",
+    "horizontal": "horizontal",
+    "rotation":   "both",
+    "swing":      "swing",
+    "auto":       "auto",
+}
+
 # Словарь типов для UI панели: type_id → отображаемое название
 SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_RELAY:           "Реле",

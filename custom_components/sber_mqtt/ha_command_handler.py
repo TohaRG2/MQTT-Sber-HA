@@ -148,11 +148,15 @@ class HACommandHandler:
         """Обрабатывает команды управления кондиционером от Сбера.
 
         Поддерживаемые команды:
-          on_off         — включить/выключить (climate.turn_on / climate.turn_off)
-          hvac_temp_set  — установить целевую температуру (climate.set_temperature)
-          hvac_work_mode — установить режим работы (climate.set_hvac_mode)
+          on_off              — включить/выключить (climate.turn_on / climate.turn_off)
+          hvac_temp_set       — установить целевую температуру (climate.set_temperature)
+          hvac_work_mode      — установить режим работы (climate.set_hvac_mode)
+          hvac_air_flow_power — установить скорость вентилятора:
+                                  auto/low/medium/high → climate.set_fan_mode
+                                  turbo → climate.set_preset_mode(boost)
+                                  quiet → climate.set_preset_mode(sleep)
         """
-        from .const import SBER_HVAC_MODE_TO_HA
+        from .const import SBER_HVAC_MODE_TO_HA, SBER_AIR_FLOW_TO_HA_AC
 
         attrs     = device.get("attributes", {})
         entity_id = attrs.get("entity_id", "")
@@ -205,10 +209,65 @@ class HACommandHandler:
                     )
                 else:
                     _LOGGER.warning(
-                        "HVAC %s: неизвестный режим Сбера '%s'", device.get("id"), sber_mode
+                        "HVAC %s: неизвестный hvac_work_mode '%s'", device.get("id"), sber_mode
                     )
 
-    async def _handle_vacuum_command(self, device: dict, states: list) -> None:
+            elif key == "hvac_air_flow_power":
+                sber_flow = val_obj.get("enum_value", "")
+                mapping   = SBER_AIR_FLOW_TO_HA_AC.get(sber_flow)
+                if not mapping:
+                    _LOGGER.warning(
+                        "HVAC %s: неизвестный hvac_air_flow_power '%s'", device.get("id"), sber_flow
+                    )
+                    continue
+                fan_mode, preset_mode = mapping
+                if preset_mode and preset_mode != "none":
+                    # turbo/quiet — через preset_mode
+                    _LOGGER.info(
+                        "HVAC %s: hvac_air_flow_power=%s → set_preset_mode(%s)",
+                        device.get("id"), sber_flow, preset_mode,
+                    )
+                    await self._hass.services.async_call(
+                        "climate", "set_preset_mode",
+                        {"entity_id": entity_id, "preset_mode": preset_mode},
+                        blocking=False,
+                    )
+                elif fan_mode:
+                    # auto/low/medium/high — через fan_mode, сбрасываем preset на none
+                    _LOGGER.info(
+                        "HVAC %s: hvac_air_flow_power=%s → set_fan_mode(%s)",
+                        device.get("id"), sber_flow, fan_mode,
+                    )
+                    await self._hass.services.async_call(
+                        "climate", "set_fan_mode",
+                        {"entity_id": entity_id, "fan_mode": fan_mode},
+                        blocking=False,
+                    )
+                    # Сбрасываем preset в none чтобы не осталось boost/sleep
+                    await self._hass.services.async_call(
+                        "climate", "set_preset_mode",
+                        {"entity_id": entity_id, "preset_mode": "none"},
+                        blocking=False,
+                    )
+
+            elif key == "hvac_air_flow_direction":
+                from .const import SBER_AIR_FLOW_DIR_TO_HA
+                sber_dir = val_obj.get("enum_value", "")
+                ha_swing = SBER_AIR_FLOW_DIR_TO_HA.get(sber_dir)
+                if ha_swing:
+                    _LOGGER.info(
+                        "HVAC %s: hvac_air_flow_direction=%s → set_swing_mode(%s)",
+                        device.get("id"), sber_dir, ha_swing,
+                    )
+                    await self._hass.services.async_call(
+                        "climate", "set_swing_mode",
+                        {"entity_id": entity_id, "swing_mode": ha_swing},
+                        blocking=False,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "HVAC %s: неизвестный hvac_air_flow_direction '%s'", device.get("id"), sber_dir
+                    )
         """Обрабатывает команды управления пылесосом от Сбера.
 
         Поддерживаемые команды (vacuum_cleaner_command):
