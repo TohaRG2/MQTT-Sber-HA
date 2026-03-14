@@ -412,14 +412,26 @@ class SberPublishStatusView(HomeAssistantView):
 
         from .state_builder import build_current_state_payload
 
+        # Опциональный фильтр по одному устройству: {"device_id": "my_device"}
+        try:
+            body = await request.json()
+            filter_id = body.get("device_id") if isinstance(body, dict) else None
+        except Exception:
+            filter_id = None
+
+        devices_to_publish = (
+            {filter_id: registry.get_device(filter_id)}
+            if filter_id and registry.get_device(filter_id)
+            else registry.devices
+        )
+
         updated_states = {}  # device_id → last_state для возврата в панель
 
-        for device_id, device in registry.devices.items():
+        for device_id, device in devices_to_publish.items():
             payload = build_current_state_payload(hass, device_id, device, serializer)
             if not payload:
                 continue
             mqtt_client.publish_status(payload)
-            # Сохраняем last_state и собираем для ответа
             last = _json.loads(payload)["devices"][device_id]
             await registry.async_update_last_state(device_id, last)
             updated_states[device_id] = last

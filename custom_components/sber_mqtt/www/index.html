@@ -39,8 +39,13 @@ tr:last-child td{border-bottom:none}tr:hover td{background:#fafafa}
 .id-cell{display:block;font-family:monospace;font-size:11px;color:var(--muted);margin-top:2px}
 .type-badge{display:inline-flex;align-items:center;gap:3px;background:var(--primary-lt);color:var(--primary-dk);padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap}
 .attrs{font-size:11px;color:var(--muted);line-height:1.7;word-break:break-all}
-.state-cell{font-size:10px;font-family:monospace;background:#f6f8fa;border:1px solid var(--border);border-radius:4px;padding:3px 6px;max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;display:inline-block}
-.state-cell:hover{white-space:normal;word-break:break-all;max-width:none}
+.state-cell{font-size:10px;font-family:monospace;background:#f6f8fa;border:1px solid var(--border);border-radius:4px;padding:3px 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;flex:1;min-width:0}
+.state-cell:hover{white-space:normal;word-break:break-all}
+.state-wrap{display:flex;align-items:center;gap:4px;width:100%}
+.btn-sync{background:none;border:none;cursor:pointer;color:var(--muted);padding:2px 4px;border-radius:4px;line-height:1;transition:color .15s;flex-shrink:0}
+.btn-sync:hover{color:var(--primary)}
+.btn-sync.spinning svg{animation:spin .6s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .empty{text-align:center;padding:56px 20px;color:var(--muted)}
 .empty .ei{font-size:44px;margin-bottom:14px}.empty h3{font-size:17px;margin-bottom:6px;color:var(--text)}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-start;justify-content:center;padding:20px 12px;overflow-y:auto}
@@ -307,7 +312,14 @@ function renderTable() {
       <td>${esc(d.room||'—')}</td>
       <td><span class="type-badge">${esc(TYPE_LABELS[d.device_type]||d.device_type)}</span></td>
       <td class="attrs">${attrs||'—'}</td>
-      <td class="state-col"><span class="state-cell" title="${fmtState(d.last_state)}">${esc(fmtState(d.last_state))}</span></td>
+      <td class="state-col">
+        <div class="state-wrap">
+          <span class="state-cell" title="${fmtState(d.last_state)}">${esc(fmtState(d.last_state))}</span>
+          <button class="btn-sync" id="sync-${esc(d.id)}" onclick="publishOneStatus('${esc(d.id)}')" title="Отправить состояние">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M12 4V1L8 5l4 4V6c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46C19.54 15.03 20 13.57 20 12c0-4.42-3.58-8-8-8zm0 14c-3.31 0-6-2.69-6-6 0-1.01.25-1.97.7-2.8L5.24 7.74C4.46 8.97 4 10.43 4 12c0 4.42 3.58 8 8 8v3l4-4-4-4v3z"/></svg>
+          </button>
+        </div>
+      </td>
       <td class="del-col"><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
     </tr>`;
   }).join('');
@@ -404,6 +416,27 @@ async function doPublishStatus(){
       toast(`Состояния (${Object.keys(r.states||{}).length} устройств) отправлены`,'ok');
     }
   } catch(e){toast('Ошибка: '+e.message,'err');}
+}
+
+async function publishOneStatus(deviceId){
+  const btn=document.getElementById('sync-'+deviceId);
+  if(btn) btn.classList.add('spinning');
+  try{
+    const r=await api('/api/sber_mqtt/publish_status',{method:'POST',body:JSON.stringify({device_id:deviceId})});
+    if(r.ok){
+      const last=r.states?.[deviceId];
+      if(last){
+        const d=devices.find(x=>x.id===deviceId);
+        if(d){d.last_state=last;renderTable();}
+      }
+      toast('Состояние отправлено','ok');
+    }
+  } catch(e){toast('Ошибка: '+e.message,'err');}
+  finally{
+    // Останавливаем анимацию (кнопка могла перерисоваться через renderTable)
+    const b=document.getElementById('sync-'+deviceId);
+    if(b) b.classList.remove('spinning');
+  }
 }
 
 function askDel(id,name){delId=id;document.getElementById('confTxt').textContent=`Устройство «${name}» будет удалено.`;document.getElementById('conf').style.display='flex';}
