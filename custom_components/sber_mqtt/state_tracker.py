@@ -297,6 +297,33 @@ class StateTracker:
                 if s.get("key") == "on_off" and s.get("value", {}).get("bool_value") == is_on:
                     return  # состояние не изменилось
 
+        # ── Сценарная кнопка — button_event только при реальном срабатывании ──
+        if device_type == DEVICE_TYPE_SCENARIO_BUTTON:
+            entity_id = attrs.get("entity_id", "")
+            domain    = entity_id.split(".")[0] if entity_id else ""
+
+            if domain in SCENARIO_BUTTON_PUSH_DOMAINS:
+                # button/input_button/script — любое изменение = click
+                payload = self._serializer.build_scenario_button_event_payload(device_id, "click")
+            elif domain in SCENARIO_BUTTON_STATEFUL_DOMAINS:
+                # switch/light/etc — click при включении, double_click при выключении
+                state = self._hass.states.get(entity_id)
+                if state is None:
+                    return
+                is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
+                from .const import SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK
+                event   = SCENARIO_BUTTON_CLICK if is_on else SCENARIO_BUTTON_DOUBLE_CLICK
+                payload = self._serializer.build_scenario_button_event_payload(device_id, event)
+            else:
+                return
+
+            _LOGGER.debug("StateTracker %s (scenario_button): button_event", device_id)
+            self._publish_status(payload)
+            self._hass.async_create_task(
+                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+            )
+            return
+
         # ── Формируем payload через state_builder ────────────────────────
         payload = build_current_state_payload(self._hass, device_id, device, self._serializer)
         if not payload:

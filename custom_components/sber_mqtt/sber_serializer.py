@@ -666,6 +666,23 @@ class SberSerializer:
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    def build_scenario_button_online_payload(self, device_id: str) -> str:
+        """Состояние сценарной кнопки в покое — только online, без button_event.
+
+        Используется при опросе состояний от Сбера и при инициализации.
+        button_event отправляется только в момент реального нажатия кнопки в HA.
+        """
+        payload = {
+            "devices": {
+                device_id: {
+                    "states": [
+                        {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+                    ]
+                }
+            }
+        }
+        return json.dumps(payload, ensure_ascii=False)
+
     def build_hvac_ac_state_payload(
         self,
         device_id: str,

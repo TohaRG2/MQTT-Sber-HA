@@ -17,10 +17,6 @@ from homeassistant.core import HomeAssistant
 
 from .const import (
     RELAY_BUTTON_DOMAINS,
-    SCENARIO_BUTTON_PUSH_DOMAINS,
-    SCENARIO_BUTTON_STATEFUL_DOMAINS,
-    SCENARIO_BUTTON_CLICK,
-    SCENARIO_BUTTON_DOUBLE_CLICK,
     HA_HVAC_MODE_TO_SBER,
     HA_VACUUM_STATUS_TO_SBER,
     HA_VALVE_STATE_TO_SBER,
@@ -109,20 +105,10 @@ def build_current_state_payload(
 
     # ── Сценарная кнопка ─────────────────────────────────────────────────
     if device_type == "scenario_button":
-        entity_id = attrs.get("entity_id", "")
-        domain = entity_id.split(".")[0] if entity_id else ""
-        if domain in SCENARIO_BUTTON_PUSH_DOMAINS:
-            event = SCENARIO_BUTTON_CLICK
-        elif domain in SCENARIO_BUTTON_STATEFUL_DOMAINS:
-            state = hass.states.get(entity_id)
-            if state:
-                is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
-            else:
-                is_on = False
-            event = SCENARIO_BUTTON_CLICK if is_on else SCENARIO_BUTTON_DOUBLE_CLICK
-        else:
-            return None
-        return serializer.build_scenario_button_event_payload(device_id, event)
+        # При опросе состояния всегда возвращаем только online — без button_event.
+        # button_event отправляется исключительно из state_tracker при реальном
+        # нажатии кнопки / переключении сущности в HA.
+        return serializer.build_scenario_button_online_payload(device_id)
 
     # ── Кондиционер ──────────────────────────────────────────────────────
     if device_type == "hvac_ac":
