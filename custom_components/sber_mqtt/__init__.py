@@ -193,6 +193,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberDevCommandsHistoryView,
         SberDevCommandsStreamView,
         SberDevPanelView,
+        SberDevToolsExistsView,
     )
     hass.http.register_view(SberDevicesView(hass))
     hass.http.register_view(SberDeviceView(hass))
@@ -219,6 +220,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberDevCommandsHistoryView(hass))
     hass.http.register_view(SberDevCommandsStreamView(hass))
     hass.http.register_view(SberDevPanelView(hass))
+    hass.http.register_view(SberDevToolsExistsView(hass))
 
 
 # ------------------------------------------------------------------ #

@@ -255,9 +255,9 @@ class SberDevicesView(HomeAssistantView):
         mqtt_client.publish_config(config_payload)
 
         # Публикуем начальное состояние нового устройства и сохраняем в last_state
-        from .__init__ import _build_current_state_payload
+        from .state_builder import build_current_state_payload
         import json as _json
-        status_payload = _build_current_state_payload(hass, device_id, device_entry, serializer)
+        status_payload = build_current_state_payload(hass, device_id, device_entry, serializer)
         if status_payload:
             mqtt_client.publish_status(status_payload)
             last = _json.loads(status_payload)["devices"][device_id]
@@ -410,12 +410,12 @@ class SberPublishStatusView(HomeAssistantView):
         serializer  = data["serializer"]
         mqtt_client = data["mqtt_client"]
 
-        from .__init__ import _build_current_state_payload
+        from .state_builder import build_current_state_payload
 
         updated_states = {}  # device_id → last_state для возврата в панель
 
         for device_id, device in registry.devices.items():
-            payload = _build_current_state_payload(hass, device_id, device, serializer)
+            payload = build_current_state_payload(hass, device_id, device, serializer)
             if not payload:
                 continue
             mqtt_client.publish_status(payload)
@@ -593,8 +593,8 @@ class SberDevStateView(HomeAssistantView):
         device = data["device_registry"].get_device(device_id)
         if not device:
             return web.json_response({"error": "Device not found"}, status=404)
-        from .__init__ import _build_current_state_payload
-        payload_str = _build_current_state_payload(hass, device_id, device, data["serializer"])
+        from .state_builder import build_current_state_payload
+        payload_str = build_current_state_payload(hass, device_id, device, data["serializer"])
         if not payload_str:
             return web.json_response({"device_id": device_id, "payload": None, "last_state": device.get("last_state", {})})
         return web.json_response({
@@ -755,6 +755,35 @@ class SberDevPanelView(HomeAssistantView):
         inject = f'<script>\nwindow.HA_ACCESS_TOKEN = {repr(token)};\n</script>\n'
         html = html.replace("</head>", inject + "</head>", 1)
         return web.Response(text=html, content_type="text/html")
+
+
+class SberDevToolsExistsView(HomeAssistantView):
+    """Проверяет наличие devtools.html рядом с index.html.
+
+    Используется панелью чтобы показывать кнопку Dev Tools только если
+    разработчик положил полноценный devtools.html вместо заглушки.
+    Не требует авторизации — вызывается до инициализации токена.
+    """
+
+    url  = "/api/sber_mqtt/devtools/exists"
+    name = "api:sber_mqtt:devtools_exists"
+    requires_auth = False
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        html_path = Path(__file__).parent / "www" / "devtools.html"
+        exists = html_path.exists()
+        # Заглушка не считается — проверяем что файл содержит признак полноценной консоли
+        if exists:
+            try:
+                content = html_path.read_text(encoding="utf-8", errors="ignore")
+                # Заглушка содержит этот маркер; полноценный devtools.html его не имеет
+                exists = "А вы точно разработчик?" not in content
+            except OSError:
+                exists = False
+        return web.json_response({"exists": exists})
 
 
 class SberConnectionStatusView(HomeAssistantView):
