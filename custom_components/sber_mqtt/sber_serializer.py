@@ -70,6 +70,7 @@ from .const import (
     DEVICE_TYPE_WATER_LEAK,
     DEVICE_TYPE_HUMIDIFIER,
     DEVICE_TYPE_SOCKET,
+    DEVICE_TYPE_SMOKE,
     HA_HVAC_MODE_TO_SBER,
     HA_MODE_TO_SBER_AIR_FLOW,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
@@ -150,6 +151,8 @@ class SberSerializer:
             return self._humidifier_config(device_id, device)
         if device_type == DEVICE_TYPE_SOCKET:
             return self._socket_config(device_id, device)
+        if device_type == DEVICE_TYPE_SMOKE:
+            return self._smoke_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -190,8 +193,6 @@ class SberSerializer:
             features.append("humidity")
         if attrs.get("battery_entity"):
             features.append("battery_percentage")
-        if attrs.get("signal_entity"):
-            features.append("signal_strength")
 
         entry = {
             "id": device_id,
@@ -489,6 +490,37 @@ class SberSerializer:
                 "manufacturer": MANUFACTURER,
                 "model": "Model_water_leak",
                 "category": "sensor_water_leak",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _smoke_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для датчика дыма (sensor_smoke).
+
+        Обязательные функции: online, smoke_state.
+        Опциональные: battery_percentage, alarm_mute.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "smoke_state"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+        if attrs.get("alarm_mute_entity"):
+            features.append("alarm_mute")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_smoke",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_smoke",
+                "category": "sensor_smoke",
                 "features": features,
             },
             "model_id": "",
@@ -902,6 +934,38 @@ class SberSerializer:
                 pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
+    def build_smoke_state_payload(
+        self,
+        device_id: str,
+        smoke_detected: bool,
+        battery: float | None = None,
+        alarm_mute: bool | None = None,
+    ) -> str:
+        """Состояние датчика дыма.
+
+        smoke_detected — True если дым обнаружен (HA binary_sensor state == 'on')
+        battery        — заряд батареи 0–100, из sensor с device_class battery
+        alarm_mute     — звуковое оповещение выключено (switch/input_boolean в состоянии on)
+        """
+        states: list[dict] = [
+            {"key": "online",      "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "smoke_state", "value": {"type": "BOOL", "bool_value": smoke_detected}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if alarm_mute is not None:
+            states.append({
+                "key": "alarm_mute",
+                "value": {"type": "BOOL", "bool_value": alarm_mute},
+            })
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
     def build_humidifier_state_payload(
         self,
         device_id: str,
@@ -967,7 +1031,6 @@ class SberSerializer:
         temperature: float | None,
         humidity: float | None,
         battery: float | None,
-        signal: float | None,
     ) -> str:
         """Состояние датчика температуры/влажности.
 
@@ -1007,13 +1070,6 @@ class SberSerializer:
                 })
             except (ValueError, TypeError):
                 pass
-
-        if signal is not None:
-            # Уровень сигнала — enum: low / medium / high
-            states.append({
-                "key": "signal_strength",
-                "value": {"type": "ENUM", "enum_value": self._signal_to_enum(signal)},
-            })
 
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 

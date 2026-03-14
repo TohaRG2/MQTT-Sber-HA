@@ -32,21 +32,11 @@ from .const import (
     DEVICE_TYPE_WATER_LEAK,
     DEVICE_TYPE_HUMIDIFIER,
     DEVICE_TYPE_SOCKET,
+    DEVICE_TYPE_SMOKE,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
     SCENARIO_BUTTON_PUSH_DOMAINS,
-    SCENARIO_BUTTON_CLICK,
-    SCENARIO_BUTTON_DOUBLE_CLICK,
-    HA_HVAC_MODE_TO_SBER,
-    HA_VACUUM_STATUS_TO_SBER,
-    HA_VALVE_STATE_TO_SBER,
-    HA_COVER_STATE_TO_SBER_OPEN_SET,
-    HA_COVER_STATE_TO_SBER_OPEN_STATE,
-    HA_MODE_TO_SBER_AIR_FLOW,
-    HA_AC_FAN_MODE_TO_SBER,
-    HA_AC_PRESET_TO_SBER_AIR_FLOW,
-    HA_AC_SWING_TO_SBER,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,7 +97,7 @@ class StateTracker:
 
             elif device_type == DEVICE_TYPE_SENSOR_TEMP:
                 # Отслеживаем все заполненные слоты датчика
-                for key in ("temperature_entity", "humidity_entity", "battery_entity", "signal_entity"):
+                for key in ("temperature_entity", "humidity_entity", "battery_entity"):
                     eid = attrs.get(key)
                     if eid:
                         watched.add(eid)
@@ -181,6 +171,14 @@ class StateTracker:
                     if attrs.get(key):
                         watched.add(attrs[key])
 
+            elif device_type == DEVICE_TYPE_SMOKE:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                for key in ("battery_entity", "alarm_mute_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
+
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
             return
@@ -216,537 +214,97 @@ class StateTracker:
     def _process_device_state_change(
         self, device_id: str, device: dict, changed_entity_id: str, new_state
     ) -> None:
-        """Обрабатывает изменение состояния для конкретного устройства."""
+        """Проверяет принадлежность changed_entity_id к устройству,
+        формирует payload через state_builder и публикует в Сбер.
+        """
+        import json as _json
+        from .state_builder import build_current_state_payload
+
         device_type = device.get("device_type")
         attrs       = device.get("attributes", {})
 
+        # ── Определяем набор сущностей этого устройства ──────────────────
         if device_type == DEVICE_TYPE_RELAY:
-            bound_entity = attrs.get("entity_id", "")
-            if changed_entity_id != bound_entity:
-                return
-
-            relay_state = self._hass.states.get(bound_entity)
-            if relay_state is None:
-                return
-
-            if bound_entity.startswith("media_player."):
-                is_on = relay_state.state != "off"
-            else:
-                is_on = relay_state.state == "on"
-
-            # Проверка на дубль
-            last = device.get("last_state", {})
-            last_on_off = None
-            for s in last.get("states", []):
-                if s.get("key") == "on_off":
-                    last_on_off = s.get("value", {}).get("bool_value")
-                    break
-            if last_on_off == is_on:
-                return
-
-            _LOGGER.debug("Relay %s: %s → %s", device_id,
-                          "on" if last_on_off else "off", "on" if is_on else "off")
-
-            payload = self._serializer.build_relay_state_payload(device_id, is_on)
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", "")}
 
         elif device_type == DEVICE_TYPE_SCENARIO_BUTTON:
-            bound_entity = attrs.get("entity_id", "")
-            if bound_entity != changed_entity_id:
-                return
-
-            domain = changed_entity_id.split(".")[0]
-
-            if domain in SCENARIO_BUTTON_PUSH_DOMAINS:
-                # Кнопки и сценарии: любое срабатывание → click
-                event = SCENARIO_BUTTON_CLICK
-            elif domain in SCENARIO_BUTTON_STATEFUL_DOMAINS:
-                # Статусные домены: включение → click, выключение → double_click
-                if domain == "media_player":
-                    is_on = new_state.state != "off"
-                else:
-                    is_on = new_state.state == "on"
-                event = SCENARIO_BUTTON_CLICK if is_on else SCENARIO_BUTTON_DOUBLE_CLICK
-            else:
-                return
-
-            _LOGGER.debug(
-                "ScenarioButton %s: отправляем событие '%s' (entity=%s state=%s)",
-                device_id, event, changed_entity_id, new_state.state,
-            )
-
-            payload = self._serializer.build_scenario_button_event_payload(device_id, event)
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", "")}
 
         elif device_type == DEVICE_TYPE_HVAC_AC:
-            climate_entity = attrs.get("entity_id", "")
-            temp_entity    = attrs.get("temperature_entity", "")
-            if changed_entity_id not in {climate_entity, temp_entity}:
-                return
-
-            # Читаем состояние climate-сущности
-            climate_state = self._hass.states.get(climate_entity)
-            if not climate_state:
-                return
-
-            is_on       = climate_state.state != "off"
-            target_temp = climate_state.attributes.get("temperature")
-            ha_mode     = climate_state.state if is_on else None
-            work_mode   = HA_HVAC_MODE_TO_SBER.get(ha_mode) if ha_mode else None
-
-            # Текущая температура — из внешнего датчика или из атрибутов climate
-            current_temp = None
-            if temp_entity:
-                s = self._hass.states.get(temp_entity)
-                if s and s.state not in ("unavailable", "unknown", ""):
-                    try:
-                        current_temp = float(s.state)
-                    except (ValueError, TypeError):
-                        pass
-            if current_temp is None:
-                ct = climate_state.attributes.get("current_temperature")
-                if ct is not None:
-                    try:
-                        current_temp = float(ct)
-                    except (ValueError, TypeError):
-                        pass
-
-            # Скорость вентилятора: preset_mode приоритетнее fan_mode
-            air_flow_power: str | None = None
-            if climate_state.attributes.get("fan_modes"):
-                preset = climate_state.attributes.get("preset_mode", "none")
-                if preset and preset != "none":
-                    air_flow_power = HA_AC_PRESET_TO_SBER_AIR_FLOW.get(preset)
-                if air_flow_power is None:
-                    fan_mode = climate_state.attributes.get("fan_mode", "")
-                    air_flow_power = HA_AC_FAN_MODE_TO_SBER.get(fan_mode)
-
-            # Направление потока воздуха — из swing_mode
-            air_flow_direction: str | None = None
-            if climate_state.attributes.get("swing_modes"):
-                swing = climate_state.attributes.get("swing_mode", "")
-                if swing:
-                    air_flow_direction = HA_AC_SWING_TO_SBER.get(swing)
-
-            _LOGGER.debug(
-                "HVAC %s: is_on=%s target=%.1f mode=%s current_temp=%s "
-                "air_flow_power=%s air_flow_direction=%s",
-                device_id, is_on, target_temp or 0, work_mode, current_temp,
-                air_flow_power, air_flow_direction,
-            )
-
-            payload = self._serializer.build_hvac_ac_state_payload(
-                device_id, is_on, target_temp, work_mode, current_temp,
-                air_flow_power, air_flow_direction,
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", ""), attrs.get("temperature_entity", "")}
 
         elif device_type == DEVICE_TYPE_VACUUM:
-            vacuum_entity  = attrs.get("entity_id", "")
-            battery_entity = attrs.get("battery_entity", "")
-            if changed_entity_id not in {vacuum_entity, battery_entity}:
-                return
-
-            # Читаем состояние vacuum-сущности
-            vacuum_state = self._hass.states.get(vacuum_entity)
-            if not vacuum_state:
-                return
-
-            ha_status   = vacuum_state.state
-            sber_status = HA_VACUUM_STATUS_TO_SBER.get(ha_status, "docked")
-
-            # Заряд батареи — из внешнего сенсора или из атрибутов vacuum
-            battery = None
-            if battery_entity:
-                s = self._hass.states.get(battery_entity)
-                if s and s.state not in ("unavailable", "unknown", ""):
-                    try:
-                        battery = float(s.state)
-                    except (ValueError, TypeError):
-                        pass
-            if battery is None:
-                bl = vacuum_state.attributes.get("battery_level")
-                if bl is not None:
-                    try:
-                        battery = float(bl)
-                    except (ValueError, TypeError):
-                        pass
-
-            _LOGGER.debug(
-                "Vacuum %s: status=%s→%s battery=%s",
-                device_id, ha_status, sber_status, battery,
-            )
-
-            payload = self._serializer.build_vacuum_state_payload(device_id, sber_status, battery)
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", ""), attrs.get("battery_entity", "")}
 
         elif device_type == DEVICE_TYPE_VALVE:
-            entity_id = attrs.get("entity_id", "")
-            if changed_entity_id != entity_id:
-                return
-
-            valve_state = self._hass.states.get(entity_id)
-            if not valve_state:
-                return
-
-            ha_state  = valve_state.state
-            domain    = entity_id.split(".")[0]
-
-            # open_set: открыт или закрыт
-            open_set = HA_VALVE_STATE_TO_SBER.get(ha_state, "close")
-
-            # open_state: детальный статус (opening/closing/open/close/stopped)
-            if ha_state == "opening":
-                open_state = "opening"
-            elif ha_state == "closing":
-                open_state = "closing"
-            elif open_set == "open":
-                open_state = "open"
-            else:
-                open_state = "close"
-
-            _LOGGER.debug(
-                "Valve %s: ha_state=%s → open_set=%s open_state=%s",
-                device_id, ha_state, open_set, open_state,
-            )
-
-            payload = self._serializer.build_valve_state_payload(device_id, open_set, open_state)
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", "")}
 
         elif device_type == DEVICE_TYPE_LIGHT:
-            entity_id = attrs.get("entity_id", "")
-            if changed_entity_id != entity_id:
-                return
-
-            light_state = self._hass.states.get(entity_id)
-            if not light_state:
-                return
-
-            is_on = light_state.state == "on"
-            a     = light_state.attributes
-
-            # Определяем активные фичи из конфига устройства (сохранённые при добавлении)
-            features = ["on_off"]
-            for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
-                if attrs.get(feat):
-                    features.append(feat)
-
-            # Яркость: HA 0–255 → 0.0–1.0
-            brightness_pct = None
-            if a.get("brightness") is not None:
-                try:
-                    brightness_pct = float(a["brightness"]) / 255.0
-                except (ValueError, TypeError):
-                    pass
-
-            hs_color          = a.get("hs_color")
-            # Фолбэк: если hs_color не заполнен, но есть rgb_color — конвертируем
-            if hs_color is None and a.get("rgb_color") is not None:
-                try:
-                    import colorsys
-                    r, g, b = [x / 255.0 for x in a["rgb_color"][:3]]
-                    h, s, _ = colorsys.rgb_to_hsv(r, g, b)
-                    hs_color = (h * 360.0, s * 100.0)
-                except Exception:
-                    pass
-
-            # color_temp: сначала мирады, затем фолбэк через кельвины
-            color_temp_mireds = a.get("color_temp")
-            if color_temp_mireds is None and a.get("color_temp_kelvin") is not None:
-                try:
-                    color_temp_mireds = 1_000_000 / float(a["color_temp_kelvin"])
-                except (ValueError, TypeError, ZeroDivisionError):
-                    pass
-
-            min_mireds = a.get("min_mireds")
-            max_mireds = a.get("max_mireds")
-            # Фолбэк min/max через kelvin-атрибуты
-            if min_mireds is None and a.get("max_color_temp_kelvin") is not None:
-                try:
-                    min_mireds = 1_000_000 / float(a["max_color_temp_kelvin"])
-                except (ValueError, TypeError, ZeroDivisionError):
-                    pass
-            if max_mireds is None and a.get("min_color_temp_kelvin") is not None:
-                try:
-                    max_mireds = 1_000_000 / float(a["min_color_temp_kelvin"])
-                except (ValueError, TypeError, ZeroDivisionError):
-                    pass
-            color_mode = a.get("color_mode")
-
-            _LOGGER.debug(
-                "Light %s: is_on=%s brightness=%.2f color_mode=%s color_temp=%s min=%s max=%s features=%s",
-                device_id, is_on, brightness_pct or 0, color_mode,
-                color_temp_mireds, min_mireds, max_mireds, features,
-            )
-
-            payload = self._serializer.build_light_state_payload(
-                device_id=device_id,
-                is_on=is_on,
-                features=features,
-                brightness_pct=brightness_pct,
-                hs_color=hs_color,
-                color_temp_mireds=color_temp_mireds,
-                min_mireds=min_mireds,
-                max_mireds=max_mireds,
-                color_mode=color_mode,
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", "")}
 
         elif device_type == DEVICE_TYPE_COVER:
-            entity_id      = attrs.get("entity_id", "")
-            battery_entity = attrs.get("battery_entity", "")
-            if changed_entity_id not in {entity_id, battery_entity}:
-                return
-
-            cover_state = self._hass.states.get(entity_id)
-            if not cover_state:
-                return
-
-            ha_state     = cover_state.state
-            open_set     = HA_COVER_STATE_TO_SBER_OPEN_SET.get(ha_state, "close")
-            open_state_v = HA_COVER_STATE_TO_SBER_OPEN_STATE.get(ha_state, "close")
-
-            # current_position: HA 0–100 (0=закрыто, 100=открыто)
-            pos = cover_state.attributes.get("current_position")
-            try:
-                open_percentage = max(0, min(100, round(float(pos)))) if pos is not None else (100 if open_set == "open" else 0)
-            except (ValueError, TypeError):
-                open_percentage = 0
-
-            # Заряд батареи
-            battery = None
-            if battery_entity:
-                s = self._hass.states.get(battery_entity)
-                if s and s.state not in ("unavailable", "unknown", ""):
-                    try:
-                        battery = float(s.state)
-                    except (ValueError, TypeError):
-                        pass
-
-            _LOGGER.debug(
-                "Cover %s: ha_state=%s → open_set=%s open_state=%s pos=%s battery=%s",
-                device_id, ha_state, open_set, open_state_v, open_percentage, battery,
-            )
-
-            payload = self._serializer.build_cover_state_payload(
-                device_id, open_set, open_state_v, open_percentage, battery
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {attrs.get("entity_id", ""), attrs.get("battery_entity", "")}
 
         elif device_type == DEVICE_TYPE_WATER_LEAK:
-            entity_id      = attrs.get("entity_id", "")
-            battery_entity = attrs.get("battery_entity", "")
-            if changed_entity_id not in {entity_id, battery_entity}:
-                return
+            watched = {attrs.get("entity_id", ""), attrs.get("battery_entity", "")}
 
-            leak_state = self._hass.states.get(entity_id)
-            if not leak_state:
-                return
-
-            leak_detected = leak_state.state == "on"
-
-            battery = None
-            if battery_entity:
-                s = self._hass.states.get(battery_entity)
-                if s and s.state not in ("unavailable", "unknown", ""):
-                    try:
-                        battery = float(s.state)
-                    except (ValueError, TypeError):
-                        pass
-
-            _LOGGER.debug(
-                "WaterLeak %s: leak=%s battery=%s",
-                device_id, leak_detected, battery,
-            )
-
-            payload = self._serializer.build_water_leak_state_payload(
-                device_id, leak_detected, battery
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+        elif device_type == DEVICE_TYPE_SMOKE:
+            watched = {
+                attrs.get("entity_id", ""),
+                attrs.get("battery_entity", ""),
+                attrs.get("alarm_mute_entity", ""),
+            }
 
         elif device_type == DEVICE_TYPE_HUMIDIFIER:
-            entity_id = attrs.get("entity_id", "")
-            extra_entities = {attrs.get("water_percentage_entity"), attrs.get("replace_filter_entity")} - {None, ""}
-            if changed_entity_id not in ({entity_id} | extra_entities):
-                return
-
-            state = self._hass.states.get(entity_id)
-            if not state:
-                return
-
-            is_on = state.state not in ("off", "unavailable", "unknown")
-
-            def _float_attr(attr: str) -> float | None:
-                try:
-                    v = state.attributes.get(attr)
-                    return float(v) if v is not None else None
-                except (ValueError, TypeError):
-                    return None
-
-            def _sensor_float(eid: str | None) -> float | None:
-                if not eid:
-                    return None
-                s = self._hass.states.get(eid)
-                if not s or s.state in ("unavailable", "unknown", ""):
-                    return None
-                try:
-                    return float(s.state)
-                except (ValueError, TypeError):
-                    return None
-
-            current_humidity = _float_attr("current_humidity")
-            target_humidity  = _float_attr("humidity")  # target_humidity в HA называется humidity
-            ha_mode          = state.attributes.get("mode")
-            air_flow_power   = HA_MODE_TO_SBER_AIR_FLOW.get(ha_mode) if ha_mode else None
-
-            # hvac_replace_filter: читаем из binary_sensor (on = нужна замена)
-            replace_filter_eid = attrs.get("replace_filter_entity")
-            replace_filter: bool | None = None
-            if replace_filter_eid:
-                rs = self._hass.states.get(replace_filter_eid)
-                if rs and rs.state not in ("unavailable", "unknown", ""):
-                    replace_filter = rs.state == "on"
-
-            water_percentage = _sensor_float(attrs.get("water_percentage_entity"))
-
-            _LOGGER.debug(
-                "Humidifier %s: on=%s hum=%s→%s mode=%s filter=%s water=%s%%",
-                device_id, is_on, current_humidity, target_humidity,
-                air_flow_power, replace_filter, water_percentage,
-            )
-
-            payload = self._serializer.build_humidifier_state_payload(
-                device_id, is_on,
-                current_humidity=current_humidity,
-                target_humidity=target_humidity,
-                air_flow_power=air_flow_power,
-                replace_filter=replace_filter,
-                water_percentage=water_percentage,
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {
+                attrs.get("entity_id", ""),
+                attrs.get("water_percentage_entity", ""),
+                attrs.get("replace_filter_entity", ""),
+            }
 
         elif device_type == DEVICE_TYPE_SOCKET:
-            bound_entity    = attrs.get("entity_id", "")
-            energy_entities = {attrs.get("power_entity"), attrs.get("current_entity"), attrs.get("voltage_entity")} - {None, ""}
-            if changed_entity_id not in ({bound_entity} | energy_entities):
-                return
-
-            socket_state = self._hass.states.get(bound_entity)
-            if socket_state is None:
-                return
-
-            is_on = socket_state.state == "on"
-
-            def _read_sensor(eid: str | None) -> float | None:
-                if not eid:
-                    return None
-                s = self._hass.states.get(eid)
-                if not s or s.state in ("unavailable", "unknown", ""):
-                    return None
-                try:
-                    return float(s.state)
-                except (ValueError, TypeError):
-                    return None
-
-            power   = _read_sensor(attrs.get("power_entity"))
-            current = _read_sensor(attrs.get("current_entity"))
-            voltage = _read_sensor(attrs.get("voltage_entity"))
-
-            _LOGGER.debug(
-                "Socket %s: on=%s power=%s current=%s voltage=%s",
-                device_id, is_on, power, current, voltage,
-            )
-
-            payload = self._serializer.build_socket_state_payload(
-                device_id, is_on, power=power, current=current, voltage=voltage
-            )
-            self._publish_status(payload)
-
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+            watched = {
+                attrs.get("entity_id", ""),
+                attrs.get("power_entity", ""),
+                attrs.get("current_entity", ""),
+                attrs.get("voltage_entity", ""),
+            }
 
         elif device_type == DEVICE_TYPE_SENSOR_TEMP:
-            sensor_entities = {
-                attrs.get("temperature_entity"),
-                attrs.get("humidity_entity"),
-                attrs.get("battery_entity"),
-                attrs.get("signal_entity"),
+            watched = {
+                attrs.get("temperature_entity", ""),
+                attrs.get("humidity_entity", ""),
+                attrs.get("battery_entity", ""),
             }
-            if changed_entity_id not in sensor_entities:
+
+        else:
+            return
+
+        # Убираем пустые строки и проверяем принадлежность
+        watched -= {""}
+        if changed_entity_id not in watched:
+            return
+
+        # ── Для реле — дедупликация по last_state ────────────────────────
+        if device_type == DEVICE_TYPE_RELAY:
+            relay_state = self._hass.states.get(attrs.get("entity_id", ""))
+            if relay_state is None:
                 return
+            bound_entity = attrs.get("entity_id", "")
+            is_on = (relay_state.state != "off") if bound_entity.startswith("media_player.") else (relay_state.state == "on")
+            last = device.get("last_state", {})
+            for s in last.get("states", []):
+                if s.get("key") == "on_off" and s.get("value", {}).get("bool_value") == is_on:
+                    return  # состояние не изменилось
 
-            _LOGGER.debug("Sensor %s: обновление состояния", device_id)
+        # ── Формируем payload через state_builder ────────────────────────
+        payload = build_current_state_payload(self._hass, device_id, device, self._serializer)
+        if not payload:
+            return
 
-            # Читаем актуальные значения всех слотов датчика
-            def _val(eid: str | None) -> float | None:
-                if not eid:
-                    return None
-                s = self._hass.states.get(eid)
-                if not s or s.state in ("unavailable", "unknown", ""):
-                    return None
-                try:
-                    return float(s.state)
-                except (ValueError, TypeError):
-                    return None
+        _LOGGER.debug("StateTracker %s (%s): публикуем состояние", device_id, device_type)
+        self._publish_status(payload)
 
-            payload = self._serializer.build_sensor_temp_state_payload(
-                device_id,
-                _val(attrs.get("temperature_entity")),
-                _val(attrs.get("humidity_entity")),
-                _val(attrs.get("battery_entity")),
-                _val(attrs.get("signal_entity")),
-            )
-            self._publish_status(payload)
-
-            # Сохраняем полный отправленный payload как last_state
-            import json as _json
-            self._hass.async_create_task(
-                self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
-            )
+        self._hass.async_create_task(
+            self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+        )

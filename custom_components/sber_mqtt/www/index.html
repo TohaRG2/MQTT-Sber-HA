@@ -207,7 +207,7 @@ async function api(url, opts={}) {
 }
 
 // ================================================================
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха', socket:'Розетка' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха', socket:'Розетка', smoke:'Датчик дыма' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
@@ -218,6 +218,7 @@ const STEPS = {
   light:           ['Тип устройства','Источник в HA','Параметры'],
   cover:           ['Тип устройства','Источник в HA','Параметры'],
   water_leak:      ['Тип устройства','Источник в HA','Параметры'],
+  smoke:           ['Тип устройства','Источник в HA','Параметры'],
   humidifier:      ['Тип устройства','Источник в HA','Параметры'],
   socket:          ['Тип устройства','Источник в HA','Параметры'],
 };
@@ -230,8 +231,8 @@ let usedEntities=new Set();
 function refreshUsedEntities(){
   usedEntities=new Set();
   const attrKeys=['entity_id','power_entity','current_entity','voltage_entity',
-    'temperature_entity','humidity_entity','battery_entity','signal_entity',
-    'water_percentage_entity','replace_filter_entity'];
+    'temperature_entity','humidity_entity','battery_entity',
+    'water_percentage_entity','replace_filter_entity','alarm_mute_entity'];
   for(const d of devices){
     for(const k of attrKeys){
       const v=d.attributes?.[k];
@@ -421,7 +422,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -432,7 +433,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);if(wType==='smoke')await Promise.all([fetchSmoke(),fetchSensors()]);}
     renderWiz();
   }else{
     await submitDevice();
@@ -458,6 +459,7 @@ async function wizValidate(){
     if(wType==='light'&&!wData.entity_id){toast('Выберите лампу','err');return false;}
     if(wType==='cover'&&!wData.entity_id){toast('Выберите шторы/жалюзи','err');return false;}
     if(wType==='water_leak'&&!wData.entity_id){toast('Выберите датчик протечки','err');return false;}
+    if(wType==='smoke'&&!wData.entity_id){toast('Выберите датчик дыма','err');return false;}
     if(wType==='humidifier'&&!wData.entity_id){toast('Выберите увлажнитель','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
@@ -491,7 +493,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else if(wType==='smoke')c.innerHTML=renderStep2Smoke();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -510,6 +512,7 @@ function renderStep1(){
     {label:'Датчики', items:[
       {id:'sensor_temp',    icon:'🌡️', name:'Датчик температуры/влажности', desc:'sensor — температура и влажность'},
       {id:'water_leak',     icon:'🌊', name:'Датчик протечки',              desc:'binary_sensor (moisture) — обнаружение воды'},
+      {id:'smoke',          icon:'🔥', name:'Датчик дыма',                  desc:'binary_sensor (smoke) — обнаружение дыма'},
     ]},
     {label:'Автоматизации', items:[
       {id:'scenario_button',icon:'🔔', name:'Сценарная кнопка', desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
@@ -700,7 +703,6 @@ const SENSOR_SLOTS=[
   {key:'temperature_entity',label:'🌡 Температура',cls:'temperature',req:true},
   {key:'humidity_entity',label:'💧 Влажность',cls:'humidity',req:true},
   {key:'battery_entity',label:'🔋 Заряд батареи',cls:'battery',req:false},
-  {key:'signal_entity',label:'📶 Сила сигнала',cls:'signal_strength',req:false},
 ];
 function renderStep2Sensor(){
   const slots=SENSOR_SLOTS.map(s=>{
@@ -726,7 +728,7 @@ function renderStep2Sensor(){
 function openSP(key){spField=key;document.getElementById('spWrap').style.display='';document.getElementById('spInput').value='';renderSPList('');document.getElementById('spWrap').scrollIntoView({behavior:'smooth'});}
 function renderSPList(q){
   q=(q||'').toLowerCase();
-  const clsMap={temperature_entity:'temperature',battery_entity:'battery',signal_entity:'signal_strength'};
+  const clsMap={temperature_entity:'temperature',battery_entity:'battery'};
   let list=spField==='humidity_entity'
     ? haSensors.filter(s=>s.device_class==='humidity'||s.device_class==='moisture')
     : (clsMap[spField]?haSensors.filter(s=>s.device_class===clsMap[spField]):haSensors);
@@ -755,7 +757,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'||wType==='smoke'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -796,6 +798,11 @@ async function submitDevice(){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.battery_entity)attrs.battery_entity=wData.battery_entity;
   }
+  else if(wType==='smoke'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.battery_entity)    attrs.battery_entity=wData.battery_entity;
+    if(wData.alarm_mute_entity) attrs.alarm_mute_entity=wData.alarm_mute_entity;
+  }
   else if(wType==='humidifier'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.water_percentage_entity)attrs.water_percentage_entity=wData.water_percentage_entity;
@@ -814,7 +821,7 @@ async function submitDevice(){
       attrs[f]=!!(wData.light_features&&wData.light_features.includes(f));
     }
   }
-  else{['temperature_entity','humidity_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
+  else{['temperature_entity','humidity_entity','battery_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
   const btn=document.getElementById('btnNext');btn.disabled=true;btn.innerHTML='<div class="spin"></div>';
   try{
@@ -1255,6 +1262,127 @@ function renderWlBatList(q){
 }
 function pickWlBattery(eid,name){wData.battery_entity=eid;wData.battery_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2WaterLeak();}
 function clearWlBattery(){delete wData.battery_entity;delete wData.battery_entity_name;document.getElementById('wizContent').innerHTML=renderStep2WaterLeak();}
+
+// ── Датчик дыма ───────────────────────────────────────────────────────────
+let haSmoke=[];
+async function fetchSmoke(){
+  if(haSmoke.length)return;
+  try{haSmoke=(await api('/api/sber_mqtt/ha_entities/smoke')).entities||[];}
+  catch(e){toast('Ошибка загрузки датчиков дыма','err');}
+}
+
+function renderStep2Smoke(){
+  const sel=wData.entity_id;
+  const batSel=wData.battery_entity;
+  const muteSel=wData.alarm_mute_entity;
+  const batEntity=batSel?haSensors.find(x=>x.entity_id===batSel):null;
+  const muteEntity=muteSel?haSocket.find(x=>x.entity_id===muteSel)||haSensors.find(x=>x.entity_id===muteSel):null;
+
+  const optSlots=[
+    {key:'battery_entity',    label:'🔋 Заряд батареи',   picker:'smokeBatPicker',  hint:'sensor (device_class: battery)'},
+    {key:'alarm_mute_entity', label:'🔇 Отключение звука', picker:'smokeMutePicker', hint:'switch или input_boolean'},
+  ];
+  const optHtml=optSlots.map(slot=>{
+    const eid=wData[slot.key]||'';
+    const nm=wData[slot.key+'_name']||eid;
+    return `<div class="sf" style="margin-top:10px">
+      <label>${slot.label} <span style="color:var(--muted);font-weight:400">(опционально)</span></label>
+      <button class="sf-btn ${eid?'filled':''}" onclick="document.getElementById('${slot.picker}').style.display='';document.getElementById('${slot.picker}').scrollIntoView({behavior:'smooth'})">
+        <span>${eid?nm:'Выбрать…'}</span><span>${eid?'✓':'▾'}</span>
+      </button>
+      ${eid?`<div class="sf-sub">${esc(eid)} <button class="sf-clr" onclick="delete wData['${slot.key}'];delete wData['${slot.key}_name'];document.getElementById('wizContent').innerHTML=renderStep2Smoke()">✕</button></div>`:''}
+      <div class="hint">${slot.hint}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите датчик дыма (binary_sensor, smoke):</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('smokelist').innerHTML=smokeItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('smokelist').innerHTML=smokeItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" style="max-height:160px" id="smokelist">${smokeItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    <div style="margin-top:14px">${optHtml}</div>
+    <div id="smokeBatPicker" style="display:none;margin-top:10px"><div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input id="smokeBatInput" type="text" placeholder="Поиск…" oninput="renderSmokeBatList(this.value)"/>
+        <button class="clr" onclick="smokeBatInput.value='';renderSmokeBatList('')">✕</button>
+      </div>
+      <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" style="max-height:160px" id="smokeBatList"></div>
+    </div></div>
+    <div id="smokeMutePicker" style="display:none;margin-top:10px"><div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input id="smokeMuteInput" type="text" placeholder="Поиск…" oninput="renderSmokeMuteList(this.value)"/>
+        <button class="clr" onclick="smokeMuteInput.value='';renderSmokeMuteList('')">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" style="max-height:160px" id="smokeMuteList"></div>
+    </div></div>`;
+}
+function smokeItems(){
+  const list=haSmoke.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Нет датчиков с device_class: smoke</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickSmokeEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
+    <span class="dom-badge">smoke</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickSmokeEntity(eid,name,area,deviceId){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  if(deviceId){
+    const bat=haSensors.find(s=>s.device_class==='battery'&&s.device_id===deviceId);
+    if(bat){wData.battery_entity=bat.entity_id;wData.battery_entity_name=bat.friendly_name;}
+    else{delete wData.battery_entity;delete wData.battery_entity_name;}
+  }
+  document.getElementById('wizContent').innerHTML=renderStep2Smoke();
+}
+function renderSmokeBatList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class==='battery');
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('smokeBatList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_entity===s.entity_id?'sel':''}" onclick="wData.battery_entity='${esc(s.entity_id)}';wData.battery_entity_name='${esc(s.friendly_name)}';document.getElementById('wizContent').innerHTML=renderStep2Smoke()">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков батареи</div>`;
+}
+function renderSmokeBatLowList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class==='battery'&&s.domain==='binary_sensor');
+  if(!list.length)list=haSensors.filter(s=>s.device_class==='battery');
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('smokeBatLowList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.battery_low_entity===s.entity_id?'sel':''}" onclick="wData.battery_low_entity='${esc(s.entity_id)}';wData.battery_low_entity_name='${esc(s.friendly_name)}';document.getElementById('wizContent').innerHTML=renderStep2Smoke()">
+    <span class="dom-badge">${esc(s.device_class)}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет binary_sensor с device_class: battery</div>`;
+}
+function renderSmokeSigList(q){
+  q=(q||'').toLowerCase();
+  let list=haSensors.filter(s=>s.device_class==='signal_strength'||s.device_class==='signal');
+  if(!list.length)list=haSensors;
+  if(q)list=list.filter(s=>(s.area+s.entity_id+s.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('smokeSigList');if(!el)return;
+  el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData.signal_entity===s.entity_id?'sel':''}" onclick="wData.signal_entity='${esc(s.entity_id)}';wData.signal_entity_name='${esc(s.friendly_name)}';document.getElementById('wizContent').innerHTML=renderStep2Smoke()">
+    <span class="dom-badge">${esc(s.device_class||'sensor')}</span><span class="p-area">${esc(s.area||'—')}</span>
+    <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет датчиков сигнала</div>`;
+}
+function renderSmokeMuteList(q){
+  q=(q||'').toLowerCase();
+  let list=haSocket.filter(e=>!q||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(q));
+  const el=document.getElementById('smokeMuteList');if(!el)return;
+  el.innerHTML=list.length?list.map(e=>`<div class="p-item ${wData.alarm_mute_entity===e.entity_id?'sel':''}" onclick="wData.alarm_mute_entity='${esc(e.entity_id)}';wData.alarm_mute_entity_name='${esc(e.friendly_name)}';document.getElementById('wizContent').innerHTML=renderStep2Smoke()">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join(''):`<div class="p-empty">Нет переключателей</div>`;
+}
+function openSmokeBatPicker(){const el=document.getElementById('smokeBatPicker');el.style.display='';document.getElementById('smokeBatInput').value='';renderSmokeBatList('');el.scrollIntoView({behavior:'smooth'});}
+function pickSmokeBat(eid,name){wData.battery_entity=eid;wData.battery_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2Smoke();}
+function clearSmokeBat(){delete wData.battery_entity;delete wData.battery_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Smoke();}
+function openSmokeMutePicker(){const el=document.getElementById('smokeMutePicker');el.style.display='';document.getElementById('smokeMuteInput').value='';renderSmokeMuteList('');el.scrollIntoView({behavior:'smooth'});}
+function pickSmokeMute(eid,name){wData.alarm_mute_entity=eid;wData.alarm_mute_entity_name=name;document.getElementById('wizContent').innerHTML=renderStep2Smoke();}
+function clearSmokeMute(){delete wData.alarm_mute_entity;delete wData.alarm_mute_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Smoke();}
 
 // ── Увлажнитель воздуха ───────────────────────────────────────────────────
 let haHumidifier=[];

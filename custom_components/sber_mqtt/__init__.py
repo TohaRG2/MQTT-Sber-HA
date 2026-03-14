@@ -39,12 +39,13 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.typing import ConfigType
 
-from .const import DOMAIN, RELAY_BUTTON_DOMAINS, SCENARIO_BUTTON_PUSH_DOMAINS, SCENARIO_BUTTON_STATEFUL_DOMAINS, SCENARIO_BUTTON_CLICK, SCENARIO_BUTTON_DOUBLE_CLICK, DEVICE_TYPE_HVAC_AC, HA_HVAC_MODE_TO_SBER, DEVICE_TYPE_VACUUM, HA_VACUUM_STATUS_TO_SBER, DEVICE_TYPE_VALVE, HA_VALVE_STATE_TO_SBER, DEVICE_TYPE_LIGHT, DEVICE_TYPE_COVER, HA_COVER_STATE_TO_SBER_OPEN_SET, HA_COVER_STATE_TO_SBER_OPEN_STATE, DEVICE_TYPE_WATER_LEAK, DEVICE_TYPE_HUMIDIFIER, HA_MODE_TO_SBER_AIR_FLOW, DEVICE_TYPE_SOCKET
+from .const import DOMAIN
 from .device_registry import SberDeviceRegistry
 from .mqtt_client import SberMQTTClient
 from .sber_serializer import SberSerializer
 from .state_tracker import StateTracker
 from .ha_command_handler import HACommandHandler
+from .state_builder import build_current_state_payload
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -179,6 +180,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesWaterLeakView,
         SberHAEntitiesHumidifierView,
         SberHAEntitiesSocketView,
+        SberHAEntitiesSmokeView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
@@ -204,6 +206,7 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesWaterLeakView(hass))
     hass.http.register_view(SberHAEntitiesHumidifierView(hass))
     hass.http.register_view(SberHAEntitiesSocketView(hass))
+    hass.http.register_view(SberHAEntitiesSmokeView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
@@ -295,7 +298,7 @@ def _make_on_status_request(
         )
         _LOGGER.info("Sber status_request: publishing state for %d devices", len(targets))
         for device_id, device in targets.items():
-            payload = _build_current_state_payload(hass, device_id, device, serializer)
+            payload = build_current_state_payload(hass, device_id, device, serializer)
             if payload:
                 _LOGGER.info("Sber status payload for %s: %s", device_id, payload)
                 mqtt_client.publish_status(payload)
@@ -326,346 +329,3 @@ def _get_active_entry_data(hass: HomeAssistant) -> dict | None:
     return None
 
 
-def _build_current_state_payload(
-    hass: HomeAssistant,
-    device_id: str,
-    device: dict,
-    serializer: SberSerializer,
-) -> str | None:
-    """Читает текущее состояние из HA и формирует MQTT payload для Сбера."""
-    device_type = device.get("device_type")
-    attrs = device.get("attributes", {})
-
-    if device_type == "relay":
-        entity_id = attrs.get("entity_id", "")
-        domain = entity_id.split(".")[0] if entity_id else ""
-        if domain in RELAY_BUTTON_DOMAINS:
-            is_on = False
-        else:
-            state = hass.states.get(entity_id)
-            if state:
-                is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
-            else:
-                is_on = False
-        return serializer.build_relay_state_payload(device_id, is_on)
-
-    if device_type == "sensor_temp":
-        def _val(eid: str | None) -> float | None:
-            if not eid:
-                return None
-            s = hass.states.get(eid)
-            if not s or s.state in ("unavailable", "unknown", ""):
-                return None
-            try:
-                return float(s.state)
-            except (ValueError, TypeError):
-                return None
-        return serializer.build_sensor_temp_state_payload(
-            device_id,
-            _val(attrs.get("temperature_entity")),
-            _val(attrs.get("humidity_entity")),
-            _val(attrs.get("battery_entity")),
-            _val(attrs.get("signal_entity")),
-        )
-
-    if device_type == "scenario_button":
-        entity_id = attrs.get("entity_id", "")
-        domain = entity_id.split(".")[0] if entity_id else ""
-        if domain in SCENARIO_BUTTON_PUSH_DOMAINS:
-            # Кнопки/сценарии не имеют постоянного состояния — отправляем online
-            event = SCENARIO_BUTTON_CLICK
-        elif domain in SCENARIO_BUTTON_STATEFUL_DOMAINS:
-            state = hass.states.get(entity_id)
-            if state:
-                is_on = (state.state != "off") if domain == "media_player" else (state.state == "on")
-            else:
-                is_on = False
-            event = SCENARIO_BUTTON_CLICK if is_on else SCENARIO_BUTTON_DOUBLE_CLICK
-        else:
-            return None
-        return serializer.build_scenario_button_event_payload(device_id, event)
-
-    if device_type == "hvac_ac":
-        entity_id = attrs.get("entity_id", "")
-        climate_state = hass.states.get(entity_id)
-        if not climate_state:
-            return None
-
-        is_on       = climate_state.state != "off"
-        target_temp = climate_state.attributes.get("temperature")
-        ha_mode     = climate_state.state if is_on else None
-        work_mode   = HA_HVAC_MODE_TO_SBER.get(ha_mode) if ha_mode else None
-
-        # Текущая температура — из внешнего датчика или из атрибутов climate
-        current_temp = None
-        temp_entity = attrs.get("temperature_entity", "")
-        if temp_entity:
-            s = hass.states.get(temp_entity)
-            if s and s.state not in ("unavailable", "unknown", ""):
-                try:
-                    current_temp = float(s.state)
-                except (ValueError, TypeError):
-                    pass
-        if current_temp is None:
-            ct = climate_state.attributes.get("current_temperature")
-            if ct is not None:
-                try:
-                    current_temp = float(ct)
-                except (ValueError, TypeError):
-                    pass
-
-        # Скорость вентилятора: preset_mode приоритетнее fan_mode
-        # preset boost → turbo, sleep → quiet; fan_mode auto/low/medium/high → напрямую
-        # Читаем напрямую из атрибутов climate — не зависим от наличия fan_modes в attrs устройства
-        air_flow_power: str | None = None
-        if climate_state.attributes.get("fan_modes"):
-            from .const import HA_AC_PRESET_TO_SBER_AIR_FLOW, HA_AC_FAN_MODE_TO_SBER
-            preset = climate_state.attributes.get("preset_mode", "none")
-            if preset and preset != "none":
-                air_flow_power = HA_AC_PRESET_TO_SBER_AIR_FLOW.get(preset)
-            if air_flow_power is None:
-                fan_mode = climate_state.attributes.get("fan_mode", "")
-                air_flow_power = HA_AC_FAN_MODE_TO_SBER.get(fan_mode)
-
-        # Направление потока воздуха — из swing_mode климат-сущности
-        air_flow_direction: str | None = None
-        if climate_state.attributes.get("swing_modes"):
-            from .const import HA_AC_SWING_TO_SBER
-            swing = climate_state.attributes.get("swing_mode", "")
-            if swing:
-                air_flow_direction = HA_AC_SWING_TO_SBER.get(swing)
-
-        return serializer.build_hvac_ac_state_payload(
-            device_id, is_on, target_temp, work_mode, current_temp,
-            air_flow_power, air_flow_direction
-        )
-
-    if device_type == "vacuum_cleaner":
-        entity_id = attrs.get("entity_id", "")
-        vacuum_state = hass.states.get(entity_id)
-        if not vacuum_state:
-            return None
-
-        sber_status = HA_VACUUM_STATUS_TO_SBER.get(vacuum_state.state, "docked")
-
-        # Заряд батареи — из внешнего датчика или из атрибутов vacuum
-        battery = None
-        battery_entity = attrs.get("battery_entity", "")
-        if battery_entity:
-            s = hass.states.get(battery_entity)
-            if s and s.state not in ("unavailable", "unknown", ""):
-                try:
-                    battery = float(s.state)
-                except (ValueError, TypeError):
-                    pass
-        if battery is None:
-            bl = vacuum_state.attributes.get("battery_level")
-            if bl is not None:
-                try:
-                    battery = float(bl)
-                except (ValueError, TypeError):
-                    pass
-
-        return serializer.build_vacuum_state_payload(device_id, sber_status, battery)
-
-    if device_type == "valve":
-        entity_id = attrs.get("entity_id", "")
-        valve_state = hass.states.get(entity_id)
-        if not valve_state:
-            return None
-
-        ha_state = valve_state.state
-        open_set = HA_VALVE_STATE_TO_SBER.get(ha_state, "close")
-        if ha_state == "opening":
-            open_state = "opening"
-        elif ha_state == "closing":
-            open_state = "closing"
-        elif open_set == "open":
-            open_state = "open"
-        else:
-            open_state = "close"
-
-        return serializer.build_valve_state_payload(device_id, open_set, open_state)
-
-    if device_type == "light":
-        entity_id = attrs.get("entity_id", "")
-        light_state = hass.states.get(entity_id)
-        if not light_state:
-            return None
-
-        is_on = light_state.state == "on"
-        a = light_state.attributes
-
-        features = ["on_off"]
-        for feat in ("light_brightness", "light_colour", "light_colour_temp", "light_mode"):
-            if attrs.get(feat):
-                features.append(feat)
-
-        brightness_pct = None
-        if a.get("brightness") is not None:
-            try:
-                brightness_pct = float(a["brightness"]) / 255.0
-            except (ValueError, TypeError):
-                pass
-
-        hs_color = a.get("hs_color")
-        if hs_color is None and a.get("rgb_color") is not None:
-            try:
-                import colorsys
-                r, g, b = [x / 255.0 for x in a["rgb_color"][:3]]
-                h, s, _ = colorsys.rgb_to_hsv(r, g, b)
-                hs_color = (h * 360.0, s * 100.0)
-            except Exception:
-                pass
-
-        color_temp_mireds = a.get("color_temp")
-        if color_temp_mireds is None and a.get("color_temp_kelvin") is not None:
-            try:
-                color_temp_mireds = 1_000_000 / float(a["color_temp_kelvin"])
-            except (ValueError, TypeError, ZeroDivisionError):
-                pass
-
-        min_mireds = a.get("min_mireds")
-        max_mireds = a.get("max_mireds")
-        if min_mireds is None and a.get("max_color_temp_kelvin") is not None:
-            try:
-                min_mireds = 1_000_000 / float(a["max_color_temp_kelvin"])
-            except (ValueError, TypeError, ZeroDivisionError):
-                pass
-        if max_mireds is None and a.get("min_color_temp_kelvin") is not None:
-            try:
-                max_mireds = 1_000_000 / float(a["min_color_temp_kelvin"])
-            except (ValueError, TypeError, ZeroDivisionError):
-                pass
-
-        return serializer.build_light_state_payload(
-            device_id=device_id,
-            is_on=is_on,
-            features=features,
-            brightness_pct=brightness_pct,
-            hs_color=hs_color,
-            color_temp_mireds=color_temp_mireds,
-            min_mireds=min_mireds,
-            max_mireds=max_mireds,
-            color_mode=a.get("color_mode"),
-        )
-
-    if device_type == "cover":
-        entity_id = attrs.get("entity_id", "")
-        cover_state = hass.states.get(entity_id)
-        if not cover_state:
-            return None
-
-        ha_state     = cover_state.state
-        open_set     = HA_COVER_STATE_TO_SBER_OPEN_SET.get(ha_state, "close")
-        open_state_v = HA_COVER_STATE_TO_SBER_OPEN_STATE.get(ha_state, "close")
-
-        pos = cover_state.attributes.get("current_position")
-        try:
-            open_percentage = max(0, min(100, round(float(pos)))) if pos is not None else (100 if open_set == "open" else 0)
-        except (ValueError, TypeError):
-            open_percentage = 0
-
-        battery = None
-        battery_entity = attrs.get("battery_entity", "")
-        if battery_entity:
-            s = hass.states.get(battery_entity)
-            if s and s.state not in ("unavailable", "unknown", ""):
-                try:
-                    battery = float(s.state)
-                except (ValueError, TypeError):
-                    pass
-
-        return serializer.build_cover_state_payload(
-            device_id, open_set, open_state_v, open_percentage, battery
-        )
-
-    if device_type == "water_leak":
-        entity_id  = attrs.get("entity_id", "")
-        leak_state = hass.states.get(entity_id)
-        if not leak_state:
-            return None
-
-        leak_detected = leak_state.state == "on"
-
-        battery = None
-        battery_entity = attrs.get("battery_entity", "")
-        if battery_entity:
-            s = hass.states.get(battery_entity)
-            if s and s.state not in ("unavailable", "unknown", ""):
-                try:
-                    battery = float(s.state)
-                except (ValueError, TypeError):
-                    pass
-
-        return serializer.build_water_leak_state_payload(device_id, leak_detected, battery)
-
-    if device_type == "humidifier":
-        entity_id = attrs.get("entity_id", "")
-        state = hass.states.get(entity_id)
-        if not state:
-            return None
-
-        is_on = state.state not in ("off", "unavailable", "unknown")
-
-        def _float_attr(attr: str) -> float | None:
-            try:
-                v = state.attributes.get(attr)
-                return float(v) if v is not None else None
-            except (ValueError, TypeError):
-                return None
-
-        def _sensor_float(eid: str | None) -> float | None:
-            if not eid:
-                return None
-            s = hass.states.get(eid)
-            if not s or s.state in ("unavailable", "unknown", ""):
-                return None
-            try:
-                return float(s.state)
-            except (ValueError, TypeError):
-                return None
-
-        ha_mode       = state.attributes.get("mode")
-        air_flow_power = HA_MODE_TO_SBER_AIR_FLOW.get(ha_mode) if ha_mode else None
-
-        replace_filter_eid = attrs.get("replace_filter_entity")
-        replace_filter: bool | None = None
-        if replace_filter_eid:
-            rs = hass.states.get(replace_filter_eid)
-            if rs and rs.state not in ("unavailable", "unknown", ""):
-                replace_filter = rs.state == "on"
-
-        return serializer.build_humidifier_state_payload(
-            device_id, is_on,
-            current_humidity=_float_attr("current_humidity"),
-            target_humidity=_float_attr("humidity"),
-            air_flow_power=air_flow_power,
-            replace_filter=replace_filter,
-            water_percentage=_sensor_float(attrs.get("water_percentage_entity")),
-        )
-
-    if device_type == "socket":
-        entity_id = attrs.get("entity_id", "")
-        state = hass.states.get(entity_id)
-        is_on = state.state == "on" if state else False
-
-        def _socket_sensor(eid: str | None) -> float | None:
-            if not eid:
-                return None
-            s = hass.states.get(eid)
-            if not s or s.state in ("unavailable", "unknown", ""):
-                return None
-            try:
-                return float(s.state)
-            except (ValueError, TypeError):
-                return None
-
-        return serializer.build_socket_state_payload(
-            device_id, is_on,
-            power=_socket_sensor(attrs.get("power_entity")),
-            current=_socket_sensor(attrs.get("current_entity")),
-            voltage=_socket_sensor(attrs.get("voltage_entity")),
-        )
-
-    return None
