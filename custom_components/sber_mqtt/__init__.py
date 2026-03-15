@@ -228,13 +228,21 @@ def _register_http_views(hass: HomeAssistant) -> None:
 # ------------------------------------------------------------------ #
 
 async def _async_register_panel(hass: HomeAssistant) -> None:
-    """Регистрирует панель в боковом меню HA.
+    """Регистрирует панель в боковом меню HA и статические файлы www/.
 
     Панель открывается через динамический эндпоинт /api/sber_mqtt/panel.
-    Авторизация API запросов из панели происходит через cookie сессии HA
-    (credentials: include) — никакой токен не нужен.
+    Статика (panel.css, panel.js) раздаётся через /local/sber_mqtt/.
     """
     from homeassistant.components import frontend
+
+    # Статические файлы из www/ → /local/sber_mqtt/
+    www_path = Path(__file__).parent / "www"
+    try:
+        hass.http.register_static_path(
+            "/local/sber_mqtt", str(www_path), cache_headers=False
+        )
+    except Exception:
+        pass  # уже зарегистрирован при reload
 
     # Удаляем старую панель если уже зарегистрирована
     if "sber_mqtt_panel" in hass.data.get("frontend_panels", {}):

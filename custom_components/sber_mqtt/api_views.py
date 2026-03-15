@@ -484,13 +484,27 @@ class SberPanelView(HomeAssistantView):
         if data:
             token = data["config"].get("ha_token", "")
 
-        html_path = Path(__file__).parent / "www" / "index.html"
-        # read_text() — блокирующая операция, выносим в executor
-        html = await hass.async_add_executor_job(
-            functools.partial(html_path.read_text, encoding="utf-8")
+        www = Path(__file__).parent / "www"
+
+        def _read_files():
+            html = (www / "index.html").read_text(encoding="utf-8")
+            css  = (www / "panel.css").read_text(encoding="utf-8")
+            js   = (www / "panel.js").read_text(encoding="utf-8")
+            return html, css, js
+
+        html, css, js = await hass.async_add_executor_job(_read_files)
+
+        # Заменяем ссылки на внешние файлы инлайн-содержимым
+        html = html.replace(
+            '<link rel="stylesheet" href="/local/sber_mqtt/panel.css">',
+            f'<style>\n{css}\n</style>'
+        )
+        html = html.replace(
+            '<script src="/local/sber_mqtt/panel.js"></script>',
+            f'<script>\n{js}\n</script>'
         )
 
-        # Вшиваем токен в страницу — JS читает window.HA_ACCESS_TOKEN при загрузке
+        # Вшиваем токен перед </head>
         inject = f'<script>\nwindow.HA_ACCESS_TOKEN = {repr(token)};\n</script>\n'
         html = html.replace("</head>", inject + "</head>", 1)
 
