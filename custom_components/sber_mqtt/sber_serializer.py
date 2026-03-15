@@ -71,6 +71,7 @@ from .const import (
     DEVICE_TYPE_HUMIDIFIER,
     DEVICE_TYPE_SOCKET,
     DEVICE_TYPE_SMOKE,
+    DEVICE_TYPE_KETTLE,
     HA_HVAC_MODE_TO_SBER,
     HA_MODE_TO_SBER_AIR_FLOW,
     SIGNAL_STRENGTH_LOW_THRESHOLD,
@@ -153,6 +154,8 @@ class SberSerializer:
             return self._socket_config(device_id, device)
         if device_type == DEVICE_TYPE_SMOKE:
             return self._smoke_config(device_id, device)
+        if device_type == DEVICE_TYPE_KETTLE:
+            return self._kettle_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
         return None
 
@@ -524,6 +527,61 @@ class SberSerializer:
                 "features": features,
             },
             "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _kettle_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для чайника (kettle).
+
+        Источник: сущность домена water_heater.
+        Обязательные функции: online, on_off.
+        Опциональные:
+          kitchen_water_temperature     — current_temperature из атрибутов water_heater
+          kitchen_water_temperature_set — temperature (целевая) из атрибутов water_heater
+
+        allowed_values для kitchen_water_temperature_set формируется из
+        min_temp/max_temp сохранённых при добавлении устройства.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "on_off",
+                    "kitchen_water_temperature",
+                    "kitchen_water_temperature_set"]
+
+        model: dict = {
+            "id":           "ID_kettle",
+            "manufacturer": MANUFACTURER,
+            "model":        "Model_kettle",
+            "category":     "kettle",
+            "features":     features,
+        }
+
+        # allowed_values для целевой температуры — из min_temp/max_temp water_heater
+        min_t = attrs.get("min_temp")
+        max_t = attrs.get("max_temp")
+        if min_t is not None and max_t is not None:
+            try:
+                model["allowed_values"] = {
+                    "kitchen_water_temperature_set": {
+                        "type": "INTEGER",
+                        "integer_values": {
+                            "min":  str(round(float(min_t))),
+                            "max":  str(round(float(max_t))),
+                            "step": "1",
+                        },
+                    }
+                }
+            except (ValueError, TypeError):
+                pass
+
+        entry = {
+            "id":         device_id,
+            "name":       device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model":      model,
+            "model_id":   "",
         }
         if device.get("room"):
             entry["room"] = device["room"]
@@ -981,6 +1039,41 @@ class SberSerializer:
                 "key": "alarm_mute",
                 "value": {"type": "BOOL", "bool_value": alarm_mute},
             })
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_kettle_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        current_temp: float | None = None,
+        target_temp: float | None = None,
+    ) -> str:
+        """Состояние чайника.
+
+        is_on        — включён/выключен (on_off)
+        current_temp — текущая температура воды 0–100 °C (kitchen_water_temperature)
+        target_temp  — целевая температура 0–100 °C (kitchen_water_temperature_set)
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        if current_temp is not None:
+            try:
+                states.append({
+                    "key": "kitchen_water_temperature",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(current_temp))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if target_temp is not None:
+            try:
+                states.append({
+                    "key": "kitchen_water_temperature_set",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(target_temp))))},
+                })
+            except (ValueError, TypeError):
+                pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_humidifier_state_payload(

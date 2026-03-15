@@ -42,6 +42,7 @@ DEVICE_TYPE_WATER_LEAK      = "water_leak"       # Датчик протечки
 DEVICE_TYPE_HUMIDIFIER      = "humidifier"       # Увлажнитель воздуха
 DEVICE_TYPE_SOCKET          = "socket"           # Розетка с энергомониторингом
 DEVICE_TYPE_SMOKE           = "smoke"            # Датчик дыма
+DEVICE_TYPE_KETTLE          = "kettle"           # Чайник
 
 # Маппинг скоростей вентилятора Сбер → HA (humidifier mode)
 # Сбер: auto | low | medium | high | turbo | quiet
@@ -121,6 +122,7 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_HUMIDIFIER:      "Увлажнитель воздуха",
     DEVICE_TYPE_SOCKET:          "Розетка",
     DEVICE_TYPE_SMOKE:           "Датчик дыма",
+    DEVICE_TYPE_KETTLE:          "Чайник",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────

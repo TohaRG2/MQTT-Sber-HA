@@ -26,7 +26,7 @@ async function api(url, opts={}) {
 // ═══════════════════════════════════════════════════════════
 // КОНФИГУРАЦИЯ И СОСТОЯНИЕ
 // ═══════════════════════════════════════════════════════════
-const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха', socket:'Розетка', smoke:'Датчик дыма' };
+const TYPE_LABELS = { relay:'Реле', sensor_temp:'Датчик температуры/влажности', scenario_button:'Сценарная кнопка', hvac_ac:'Кондиционер', vacuum_cleaner:'Пылесос', valve:'Кран', light:'Лампа', cover:'Рулонные шторы / жалюзи', water_leak:'Датчик протечки', humidifier:'Увлажнитель воздуха', socket:'Розетка', smoke:'Датчик дыма', kettle:'Чайник' };
 const STEPS = {
   relay:           ['Тип устройства','Источник в HA','Параметры'],
   sensor_temp:     ['Тип устройства','Датчики в HA','Параметры'],
@@ -38,6 +38,7 @@ const STEPS = {
   cover:           ['Тип устройства','Источник в HA','Параметры'],
   water_leak:      ['Тип устройства','Датчик в HA','Параметры'],
   smoke:           ['Тип устройства','Датчик в HA','Параметры'],
+  kettle:          ['Тип устройства','Источник в HA','Параметры'],
   humidifier:      ['Тип устройства','Источник в HA','Параметры'],
   socket:          ['Тип устройства','Источник в HA','Параметры'],
 };
@@ -281,7 +282,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];haKettle=[];haNumber=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -292,7 +293,7 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);if(wType==='smoke')await Promise.all([fetchSmoke(),fetchSensors()]);}
+    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);if(wType==='smoke')await Promise.all([fetchSmoke(),fetchSensors()]);if(wType==='kettle')await fetchKettle();}
     renderWiz();
   }else{
     await submitDevice();
@@ -319,6 +320,7 @@ async function wizValidate(){
     if(wType==='cover'&&!wData.entity_id){toast('Выберите шторы/жалюзи','err');return false;}
     if(wType==='water_leak'&&!wData.entity_id){toast('Выберите датчик протечки','err');return false;}
     if(wType==='smoke'&&!wData.entity_id){toast('Выберите датчик дыма','err');return false;}
+    if(wType==='kettle'&&!wData.entity_id){toast('Выберите сущность чайника','err');return false;}
     if(wType==='humidifier'&&!wData.entity_id){toast('Выберите увлажнитель','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
   }
@@ -352,7 +354,7 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else if(wType==='smoke')c.innerHTML=renderStep2Smoke();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else if(wType==='smoke')c.innerHTML=renderStep2Smoke();else if(wType==='kettle')c.innerHTML=renderStep2Kettle();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
 }
 
@@ -364,9 +366,10 @@ function renderStep1(){
       {id:'light',          icon:'💡', name:'Лампа',                   desc:'light — яркость, цвет, цветовая температура'},
       {id:'hvac_ac',        icon:'❄️', name:'Кондиционер',             desc:'climate — температура и режимы работы'},
       {id:'humidifier',     icon:'💧', name:'Увлажнитель воздуха',     desc:'humidifier — влажность, режим, скорость вентилятора'},
+      {id:'kettle',         icon:'☕', name:'Чайник',                  desc:'water_heater — включение, целевая и текущая температура воды'},
       {id:'vacuum_cleaner', icon:'🤖', name:'Пылесос',                 desc:'vacuum — управление уборкой'},
       {id:'valve',          icon:'🚰', name:'Кран',                    desc:'valve, switch — открытие и закрытие'},
-      {id:'cover',          icon:'🪟', name:'Рулонные шторы / жалюзи', desc:'cover — открытие, закрытие, позиционирование'},
+      {id:'cover',          icon:'🔲', name:'Рулонные шторы / жалюзи', desc:'cover — открытие, закрытие, позиционирование'},
     ]},
     {label:'Датчики', items:[
       {id:'sensor_temp',    icon:'🌡️', name:'Датчик температуры/влажности', desc:'sensor — температура и влажность'},
@@ -632,7 +635,7 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 // ═══════════════════════════════════════════════════════════
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'||wType==='smoke'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'||wType==='smoke'||wType==='kettle'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
@@ -677,6 +680,9 @@ async function submitDevice(){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.battery_entity)    attrs.battery_entity=wData.battery_entity;
     if(wData.alarm_mute_entity) attrs.alarm_mute_entity=wData.alarm_mute_entity;
+  }
+  else if(wType==='kettle'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
   }
   else if(wType==='humidifier'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
@@ -1420,3 +1426,61 @@ async function checkDevTools(){
 }
 
 window.addEventListener('load', init);
+
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ЧАЙНИК
+// ═══════════════════════════════════════════════════════════
+
+let haKettle=[], haNumber=[];
+
+async function fetchKettle(){
+  if(haKettle.length)return;
+  try{haKettle=(await api('/api/sber_mqtt/ha_entities/water_heater')).entities||[];}
+  catch(e){toast('Ошибка загрузки сущностей','err');}
+}
+
+async function fetchNumber(){
+  if(haNumber.length)return;
+  try{haNumber=(await api('/api/sber_mqtt/ha_entities/number')).entities||[];}
+  catch(e){toast('Ошибка загрузки number-сущностей','err');}
+}
+
+function renderStep2Kettle(){
+  const sel = wData.entity_id;
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите чайник (water_heater):</label></div>
+    <div class="picker">
+      <div class="psearch"><span style="color:var(--muted)">🔍</span>
+        <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+          oninput="sFilter=this.value;document.getElementById('kettlelist').innerHTML=kettleItems()"/>
+        <button class="clr" onclick="sFilter='';document.getElementById('kettlelist').innerHTML=kettleItems()">✕</button>
+      </div>
+      <div class="p-head"><div>Домен</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+      <div class="p-list" style="max-height:200px" id="kettlelist">${kettleItems()}</div>
+    </div>
+    ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    <div style="margin-top:12px;font-size:11px;color:var(--muted)">
+      Текущая и целевая температура воды подтягиваются автоматически из атрибутов сущности.
+    </div>`;
+}
+
+function kettleItems(){
+  const list=haKettle.filter(e=>!sFilter||(e.area+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  if(!list.length)return`<div class="p-empty">Нет water_heater сущностей</div>`;
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickKettleEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
+    <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+
+function pickKettleEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Kettle();
+}
+
+
+
+
+
+
+
+

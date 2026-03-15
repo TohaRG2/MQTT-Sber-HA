@@ -27,6 +27,7 @@ from .const import (
     HA_AC_PRESET_TO_SBER_AIR_FLOW,
     HA_AC_SWING_TO_SBER,
     DEVICE_TYPE_SMOKE,
+    DEVICE_TYPE_KETTLE,
 )
 
 if TYPE_CHECKING:
@@ -291,6 +292,26 @@ def build_current_state_payload(
             ss.state == "on",
             _sensor_float(hass, attrs.get("battery_entity")),
             _sensor_bool(hass, attrs.get("alarm_mute_entity")),
+        )
+
+    # ── Чайник ───────────────────────────────────────────────────────────
+    if device_type == DEVICE_TYPE_KETTLE:
+        entity_id = attrs.get("entity_id", "")
+        ks = hass.states.get(entity_id)
+        if not ks:
+            return None
+
+        # water_heater: off → выключен, всё остальное → включён
+        is_on = ks.state not in ("off", "unavailable", "unknown")
+
+        # Текущая температура — из атрибута current_temperature
+        current_temp = _safe_float(ks, "current_temperature")
+
+        # Целевая температура — из атрибута temperature
+        target_temp = _safe_float(ks, "temperature")
+
+        return serializer.build_kettle_state_payload(
+            device_id, is_on, current_temp, target_temp
         )
 
     # ── Увлажнитель воздуха ──────────────────────────────────────────────

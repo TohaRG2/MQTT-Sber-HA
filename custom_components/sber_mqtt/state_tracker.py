@@ -33,6 +33,7 @@ from .const import (
     DEVICE_TYPE_HUMIDIFIER,
     DEVICE_TYPE_SOCKET,
     DEVICE_TYPE_SMOKE,
+    DEVICE_TYPE_KETTLE,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
     SCENARIO_BUTTON_STATEFUL_DOMAINS,
@@ -179,6 +180,11 @@ class StateTracker:
                     if attrs.get(key):
                         watched.add(attrs[key])
 
+            elif device_type == DEVICE_TYPE_KETTLE:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+
         if not watched:
             _LOGGER.debug("Нет сущностей для отслеживания")
             return
@@ -276,6 +282,9 @@ class StateTracker:
                 attrs.get("humidity_entity", ""),
                 attrs.get("battery_entity", ""),
             }
+
+        elif device_type == DEVICE_TYPE_KETTLE:
+            watched = {attrs.get("entity_id", "")}
 
         else:
             return

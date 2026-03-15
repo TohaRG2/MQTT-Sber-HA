@@ -35,31 +35,34 @@ class HACommandHandler:
         """
         device_type = device.get("device_type")
 
+        # ── Управляемые устройства ───────────────────────────────────────
         if device_type == "relay":
             await self._handle_relay_command(device, states)
-        elif device_type == "sensor_temp":
-            # Датчики не управляются командами — игнорируем
-            _LOGGER.debug("Команда для датчика %s проигнорирована", device.get("id"))
-        elif device_type == "scenario_button":
-            # Сценарные кнопки только отправляют события в Сбер, команды не принимают
-            _LOGGER.debug("Команда для сценарной кнопки %s проигнорирована", device.get("id"))
+        elif device_type == "socket":
+            await self._handle_relay_command(device, states)  # on_off — та же логика, что и у реле
+        elif device_type == "light":
+            await self._handle_light_command(device, states)
         elif device_type == "hvac_ac":
             await self._handle_hvac_ac_command(device, states)
+        elif device_type == "humidifier":
+            await self._handle_humidifier_command(device, states)
+        elif device_type == "kettle":
+            await self._handle_kettle_command(device, states)
         elif device_type == "vacuum_cleaner":
             await self._handle_vacuum_command(device, states)
         elif device_type == "valve":
             await self._handle_valve_command(device, states)
-        elif device_type == "light":
-            await self._handle_light_command(device, states)
         elif device_type == "cover":
             await self._handle_cover_command(device, states)
-        elif device_type == "humidifier":
-            await self._handle_humidifier_command(device, states)
-        elif device_type == "water_leak":
-            pass  # датчик, команды не принимает
-        elif device_type == "socket":
-            await self._handle_relay_command(device, states)  # on_off — та же логика что у реле
-            _LOGGER.debug("Команда для датчика протечки %s проигнорирована", device.get("id"))
+
+        # ── Датчики — команды не принимают ───────────────────────────────
+        elif device_type in ("sensor_temp", "water_leak", "smoke"):
+            _LOGGER.debug("Команда для датчика %s проигнорирована", device.get("id"))
+
+        # ── Сценарные кнопки — только отправляют события в Сбер ─────────
+        elif device_type == "scenario_button":
+            _LOGGER.debug("Команда для сценарной кнопки %s проигнорирована", device.get("id"))
+
         else:
             _LOGGER.warning(
                 "Команда для устройства неизвестного типа '%s': %s",
@@ -620,3 +623,63 @@ class HACommandHandler:
                     _LOGGER.warning(
                         "Humidifier %s: неизвестный режим Сбера '%s'", device.get("id"), sber_mode
                     )
+    async def _handle_kettle_command(self, device: dict, states: list) -> None:
+        """Обрабатывает команды управления чайником от Сбера.
+
+        Источник: сущность домена water_heater.
+        Поддерживаемые команды:
+          on_off                        — включить (water_heater.turn_on) /
+                                          выключить (water_heater.set_operation_mode, mode=off)
+          kitchen_water_temperature_set — установить целевую температуру
+                                          (water_heater.set_temperature)
+        """
+        attrs     = device.get("attributes", {})
+        entity_id = attrs.get("entity_id", "")
+
+        if not entity_id:
+            _LOGGER.error("Чайник %s: не задан entity_id", device.get("id"))
+            return
+
+        for state in states:
+            key     = state.get("key")
+            val_obj = state.get("value", {})
+
+            if key == "on_off":
+                raw = val_obj.get("bool_value")
+                if isinstance(raw, bool):
+                    is_on = raw
+                elif isinstance(raw, str):
+                    is_on = raw.lower() in ("true", "1", "on")
+                else:
+                    is_on = False
+                if is_on:
+                    _LOGGER.info("Kettle %s: on_off=True → water_heater.turn_on", device.get("id"))
+                    await self._hass.services.async_call(
+                        "water_heater", "turn_on", {"entity_id": entity_id}, blocking=False
+                    )
+                else:
+                    _LOGGER.info("Kettle %s: on_off=False → water_heater.set_operation_mode(off)", device.get("id"))
+                    await self._hass.services.async_call(
+                        "water_heater", "set_operation_mode",
+                        {"entity_id": entity_id, "operation_mode": "off"},
+                        blocking=False,
+                    )
+
+            elif key == "kitchen_water_temperature_set":
+                temp = val_obj.get("integer_value")
+                if temp is not None:
+                    try:
+                        temp_f = float(temp)
+                        _LOGGER.info(
+                            "Kettle %s: set_temperature=%.0f → water_heater.set_temperature",
+                            device.get("id"), temp_f
+                        )
+                        await self._hass.services.async_call(
+                            "water_heater", "set_temperature",
+                            {"entity_id": entity_id, "temperature": temp_f},
+                            blocking=False,
+                        )
+                    except (ValueError, TypeError):
+                        _LOGGER.warning(
+                            "Kettle %s: невалидная температура: %s", device.get("id"), temp
+                        )
