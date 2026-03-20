@@ -295,3 +295,7 @@
 ## Лицензия
 
 MIT
+
+## Ссылки
+
+- [Канал для обсуждения в Макс](https://max.ru/join/PFqoffti_rCgrAPu26T-QcypaMpwu_2VA_fNE_2hNVU)
