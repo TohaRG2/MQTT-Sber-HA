@@ -18,6 +18,8 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
+from .ha_helpers import _parse_bool
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -39,7 +41,7 @@ class HACommandHandler:
         if device_type == "relay":
             await self._handle_relay_command(device, states)
         elif device_type == "socket":
-            await self._handle_relay_command(device, states)  # on_off — та же логика, что и у реле
+            await self._handle_relay_command(device, states)  # on_off — та же логика что у реле
         elif device_type == "light":
             await self._handle_light_command(device, states)
         elif device_type == "hvac_ac":
@@ -86,19 +88,10 @@ class HACommandHandler:
         for state in states:
             if state.get("key") == "on_off":
                 val_obj = state.get("value", {})
-                raw = val_obj.get("bool_value")
-                if isinstance(raw, bool):
-                    on_off_value = raw
-                elif isinstance(raw, str):
-                    on_off_value = raw.lower() in ("true", "1", "on")
-                elif isinstance(raw, int):
-                    on_off_value = bool(raw)
-                else:
-                    # bool_value отсутствует — Сбер сигнализирует о выключении
-                    on_off_value = False
+                on_off_value = _parse_bool(val_obj)
                 _LOGGER.info(
-                    "Реле %s: on_off raw=%r → интерпретируем как %s",
-                    device.get("id"), raw, on_off_value,
+                    "Реле %s: on_off=%s (raw bool_value=%r)",
+                    device.get("id"), on_off_value, val_obj.get("bool_value"),
                 )
                 break
 
@@ -173,13 +166,7 @@ class HACommandHandler:
             val_obj = state.get("value", {})
 
             if key == "on_off":
-                raw = val_obj.get("bool_value")
-                if isinstance(raw, bool):
-                    is_on = raw
-                elif isinstance(raw, str):
-                    is_on = raw.lower() in ("true", "1", "on")
-                else:
-                    is_on = False
+                is_on = _parse_bool(val_obj)
                 service = "turn_on" if is_on else "turn_off"
                 _LOGGER.info("HVAC %s: on_off=%s → climate.%s", device.get("id"), is_on, service)
                 await self._hass.services.async_call(
@@ -582,13 +569,7 @@ class HACommandHandler:
             val_obj = state.get("value", {})
 
             if key == "on_off":
-                raw = val_obj.get("bool_value")
-                if isinstance(raw, bool):
-                    is_on = raw
-                elif isinstance(raw, str):
-                    is_on = raw.lower() in ("true", "1", "on")
-                else:
-                    is_on = False
+                is_on = _parse_bool(val_obj)
                 service = "turn_on" if is_on else "turn_off"
                 _LOGGER.info("Humidifier %s: on_off=%s → humidifier.%s", device.get("id"), is_on, service)
                 await self._hass.services.async_call(
@@ -645,13 +626,7 @@ class HACommandHandler:
             val_obj = state.get("value", {})
 
             if key == "on_off":
-                raw = val_obj.get("bool_value")
-                if isinstance(raw, bool):
-                    is_on = raw
-                elif isinstance(raw, str):
-                    is_on = raw.lower() in ("true", "1", "on")
-                else:
-                    is_on = False
+                is_on = _parse_bool(val_obj)
                 if is_on:
                     _LOGGER.info("Kettle %s: on_off=True → water_heater.turn_on", device.get("id"))
                     await self._hass.services.async_call(

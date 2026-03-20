@@ -45,7 +45,7 @@ from .const import (
     DEVICE_TYPE_KETTLE,
     SUPPORTED_DEVICE_TYPES,
 )
-from .ha_helpers import get_entities_for_relay, get_sensor_entities
+from .ha_helpers import get_entities_for_relay, get_sensor_entities, get_ha_entities
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -870,48 +870,12 @@ class SberHAEntitiesClimateView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "climate":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            # Комната
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            # fan_modes и preset_modes сохраняются в attributes устройства при добавлении,
-            # чтобы сериализатор знал заявлять ли hvac_air_flow_power в конфиге Сбера
-            fan_modes    = state.attributes.get("fan_modes",    []) if state else []
-            preset_modes = state.attributes.get("preset_modes", []) if state else []
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "climate",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "fan_modes":     fan_modes,
-                "preset_modes":  preset_modes,
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, "climate", extra_fields={
+            "fan_modes":    lambda s, e: s.attributes.get("fan_modes",    []) if s else [],
+            "preset_modes": lambda s, e: s.attributes.get("preset_modes", []) if s else [],
+        })
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/vacuum ─────────────────────────────────
@@ -927,52 +891,15 @@ class SberHAEntitiesVacuumView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "vacuum":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            # Заряд батареи из атрибутов — для автоподстановки в UI
-            battery_level = None
-            if state:
-                bl = state.attributes.get("battery_level")
-                if bl is not None:
-                    try:
-                        battery_level = int(float(bl))
-                    except (ValueError, TypeError):
-                        pass
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "vacuum",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "battery_level": battery_level,
-                "device_id":     entry.device_id,
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        def _battery(s, e):
+            if not s: return None
+            bl = s.attributes.get("battery_level")
+            if bl is None: return None
+            try: return int(float(bl))
+            except (ValueError, TypeError): return None
+        entities = get_ha_entities(hass, "vacuum", extra_fields={"battery_level": _battery})
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/valve ──────────────────────────────────
@@ -988,41 +915,10 @@ class SberHAEntitiesValveView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain not in ("valve", "switch"):
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        entry.domain,
-                "friendly_name": friendly_name,
-                "area":          area_name,
-            })
-        result.sort(key=lambda x: (x["domain"], x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, ["valve", "switch"])
+        entities.sort(key=lambda x: (x["domain"], x["area"], x["friendly_name"]))
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/light ──────────────────────────────────
@@ -1041,61 +937,18 @@ class SberHAEntitiesLightView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "light":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-
-            # Определяем поддерживаемые фичи из атрибутов и supported_color_modes
-            supported_features: list[str] = []
-            if state:
-                a = state.attributes
-                scm = set(a.get("supported_color_modes") or [])
-                # Яркость: поддерживается если есть хоть один mode кроме onoff
-                if scm - {"onoff"}:
-                    supported_features.append("light_brightness")
-                # Цветовая температура
-                if "color_temp" in scm:
-                    supported_features.append("light_colour_temp")
-                # Цвет
-                if scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}:
-                    supported_features.append("light_colour")
-                # Режим: только если поддерживаются и цвет и белый одновременно
-                if (scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}) and ("color_temp" in scm or "white" in scm):
-                    supported_features.append("light_mode")
-
-            result.append({
-                "entity_id":         entry.entity_id,
-                "domain":            "light",
-                "friendly_name":     friendly_name,
-                "area":              area_name,
-                "supported_features": supported_features,
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        def _features(s, e):
+            if not s: return []
+            scm = set(s.attributes.get("supported_color_modes") or [])
+            f = []
+            if scm - {"onoff"}:                                               f.append("light_brightness")
+            if "color_temp" in scm:                                           f.append("light_colour_temp")
+            if scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}:                   f.append("light_colour")
+            if (scm & {"hs", "rgb", "rgbw", "rgbww", "xy"}) and ("color_temp" in scm or "white" in scm): f.append("light_mode")
+            return f
+        entities = get_ha_entities(hass, "light", extra_fields={"supported_features": _features})
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/cover ─────────────────────────────────
@@ -1111,52 +964,15 @@ class SberHAEntitiesCoverView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "cover":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            # Текущая позиция для отображения в UI
-            current_position = None
-            if state:
-                pos = state.attributes.get("current_position")
-                if pos is not None:
-                    try:
-                        current_position = int(float(pos))
-                    except (ValueError, TypeError):
-                        pass
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":        entry.entity_id,
-                "domain":           "cover",
-                "friendly_name":    friendly_name,
-                "area":             area_name,
-                "current_position": current_position,
-                "device_id":        entry.device_id or "",
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        def _pos(s, e):
+            if not s: return None
+            pos = s.attributes.get("current_position")
+            if pos is None: return None
+            try: return int(float(pos))
+            except (ValueError, TypeError): return None
+        entities = get_ha_entities(hass, "cover", extra_fields={"current_position": _pos})
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/water_leak ─────────────────────────────
@@ -1172,46 +988,9 @@ class SberHAEntitiesWaterLeakView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "binary_sensor":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            # Фильтруем по device_class moisture
-            dc = (state.attributes.get("device_class") if state else None) or entry.device_class or ""
-            if dc != "moisture":
-                continue
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "binary_sensor",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, "binary_sensor", device_class="moisture")
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/smoke ──────────────────────────────────
@@ -1227,45 +1006,9 @@ class SberHAEntitiesSmokeView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "binary_sensor":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            dc = (state.attributes.get("device_class") if state else None) or entry.device_class or ""
-            if dc != "smoke":
-                continue
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "binary_sensor",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, "binary_sensor", device_class="smoke")
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/number ─────────────────────────────────
@@ -1281,50 +1024,13 @@ class SberHAEntitiesNumberView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain not in ("number", "input_number"):
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            # Передаём min/max/step чтобы UI мог показать диапазон
-            # и api_views сохранил их в allowed_values при добавлении
-            min_val  = state.attributes.get("min")  if state else None
-            max_val  = state.attributes.get("max")  if state else None
-            step_val = state.attributes.get("step") if state else None
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        entry.domain,
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-                "min":           min_val,
-                "max":           max_val,
-                "step":          step_val,
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, ["number", "input_number"], extra_fields={
+            "min":  lambda s, e: s.attributes.get("min")  if s else None,
+            "max":  lambda s, e: s.attributes.get("max")  if s else None,
+            "step": lambda s, e: s.attributes.get("step") if s else None,
+        })
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/water_heater ───────────────────────────
@@ -1340,42 +1046,9 @@ class SberHAEntitiesWaterHeaterView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "water_heater":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "water_heater",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, "water_heater")
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/humidifier ─────────────────────────────
@@ -1391,49 +1064,11 @@ class SberHAEntitiesHumidifierView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain != "humidifier":
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-
-            # Определяем поддерживаемые режимы
-            modes: list[str] = []
-            if state:
-                modes = state.attributes.get("available_modes", []) or []
-
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        "humidifier",
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-                "available_modes": modes,
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, "humidifier", extra_fields={
+            "available_modes": lambda s, e: (s.attributes.get("available_modes") or []) if s else [],
+        })
+        return web.json_response({"entities": entities})
 
 
 # ── GET /api/sber_mqtt/ha_entities/socket ────────────────────────────────────
@@ -1449,39 +1084,6 @@ class SberHAEntitiesSocketView(HomeAssistantView):
         pass
 
     async def get(self, request: web.Request) -> web.Response:
-        from homeassistant.helpers import entity_registry as er, area_registry as ar, device_registry as dr
         hass: HomeAssistant = request.app["hass"]
-        entity_reg = er.async_get(hass)
-        area_reg   = ar.async_get(hass)
-        device_reg = dr.async_get(hass)
-        result = []
-        for entry in entity_reg.entities.values():
-            if entry.domain not in ("switch", "input_boolean"):
-                continue
-            if entry.disabled_by:
-                continue
-            state = hass.states.get(entry.entity_id)
-            friendly_name = (
-                state.attributes.get("friendly_name", entry.entity_id) if state
-                else (entry.name or entry.entity_id)
-            )
-            area_name = ""
-            if entry.area_id:
-                area = area_reg.async_get_area(entry.area_id)
-                if area:
-                    area_name = area.name
-            elif entry.device_id:
-                dev = device_reg.async_get(entry.device_id)
-                if dev and dev.area_id:
-                    area = area_reg.async_get_area(dev.area_id)
-                    if area:
-                        area_name = area.name
-            result.append({
-                "entity_id":     entry.entity_id,
-                "domain":        entry.domain,
-                "friendly_name": friendly_name,
-                "area":          area_name,
-                "device_id":     entry.device_id or "",
-            })
-        result.sort(key=lambda x: (x["area"], x["friendly_name"]))
-        return web.json_response({"entities": result})
+        entities = get_ha_entities(hass, ["switch", "input_boolean"])
+        return web.json_response({"entities": entities})

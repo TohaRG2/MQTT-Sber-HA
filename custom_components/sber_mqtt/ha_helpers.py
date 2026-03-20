@@ -181,3 +181,92 @@ def get_entity_info(hass: HomeAssistant, entity_id: str) -> dict[str, Any]:
 
     area = get_area_name(hass, entry)
     return {"friendly_name": friendly_name, "area": area}
+
+
+def get_ha_entities(
+    hass: HomeAssistant,
+    domains: str | list[str],
+    device_class: str | None = None,
+    extra_fields: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Универсальный хелпер для entity views — возвращает сущности по домену и device_class.
+
+    domains       — домен или список доменов, например "water_heater" или ["switch", "input_boolean"]
+    device_class  — фильтр по device_class (опционально), например "moisture"
+    extra_fields  — словарь {поле: callable(state, entry)} для дополнительных полей в результат
+
+    Каждый элемент результата содержит: entity_id, domain, friendly_name, area, device_id.
+    При указании device_class добавляется поле device_class.
+    Список отсортирован по комнате и имени.
+    """
+    if isinstance(domains, str):
+        domains = [domains]
+    domains_set = set(domains)
+
+    entity_reg = er.async_get(hass)
+    result = []
+
+    for entry in entity_reg.entities.values():
+        if entry.domain not in domains_set:
+            continue
+        if entry.disabled_by:
+            continue
+
+        state = hass.states.get(entry.entity_id)
+
+        # Фильтр по device_class если задан
+        if device_class is not None:
+            dc = (
+                entry.original_device_class
+                or entry.device_class
+                or (state.attributes.get("device_class", "") if state else "")
+            )
+            if dc != device_class:
+                continue
+
+        friendly_name = (
+            state.attributes.get("friendly_name", entry.entity_id) if state
+            else (entry.name or entry.entity_id)
+        )
+        area = get_area_name(hass, entry)
+
+        item: dict[str, Any] = {
+            "entity_id":     entry.entity_id,
+            "domain":        entry.domain,
+            "friendly_name": friendly_name,
+            "area":          area,
+            "device_id":     entry.device_id or "",
+        }
+        if device_class is not None:
+            item["device_class"] = device_class
+
+        # Дополнительные поля — например min/max/step для number
+        if extra_fields:
+            for field, getter in extra_fields.items():
+                item[field] = getter(state, entry)
+
+        result.append(item)
+
+    result.sort(key=lambda x: (x["area"], x["friendly_name"]))
+    return result
+
+
+def _parse_bool(val_obj: dict) -> bool:
+    """Парсит bool_value из объекта значения Сбера.
+
+    Сбер может прислать bool_value как:
+      - bool: True / False
+      - str:  "true" / "false" / "1" / "0" / "on" / "off"
+      - int:  1 / 0
+      - None: отсутствует — трактуется как False
+
+    Используется в ha_command_handler для разбора команды on_off.
+    """
+    raw = val_obj.get("bool_value")
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, str):
+        return raw.lower() in ("true", "1", "on")
+    if isinstance(raw, int):
+        return bool(raw)
+    return False
