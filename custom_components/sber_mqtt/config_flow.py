@@ -16,7 +16,7 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.core import callback
-from homeassistant.data_entry_flow import FlowResult
+from homeassistant.config_entries import ConfigFlowResult
 
 from .const import (
     DOMAIN,
@@ -48,7 +48,7 @@ class SberMQTTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # Версия схемы конфигурации — увеличивается при изменении структуры данных
     VERSION = 1
 
-    async def async_step_user(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_user(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Шаг 1: ввод учётных данных MQTT.
 
         Вызывается когда пользователь нажимает «Добавить интеграцию».
@@ -65,7 +65,7 @@ class SberMQTTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             ok = await test_mqtt_connection(user_input)
             if ok:
                 # Подключение успешно — создаём config entry
-                return self.async_create_entry(
+                return self.async_create_entry(  # type: ignore[return-value]
                     title=f"Sber MQTT ({user_input[CONF_MQTT_LOGIN]})",
                     data=user_input,
                 )
@@ -73,13 +73,12 @@ class SberMQTTConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             errors["base"] = "cannot_connect"
 
         # Показываем форму (первый раз или после ошибки)
-        return self.async_show_form(
+        return self.async_show_form(  # type: ignore[return-value]
             step_id="user",
             data_schema=STEP_USER_SCHEMA,
             errors=errors,
         )
 
-    @staticmethod
     @staticmethod
     @callback
     def async_get_options_flow(config_entry: config_entries.ConfigEntry):
@@ -94,7 +93,7 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
     После сохранения интеграция автоматически перезагружается с новыми данными.
     """
 
-    async def async_step_init(self, user_input: dict | None = None) -> FlowResult:
+    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
         """Форма с текущими значениями учётных данных."""
         errors: dict[str, str] = {}
 
@@ -106,7 +105,7 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
             ok = await test_mqtt_connection(user_input)
             if ok:
                 # Сохраняем в options — __init__.py объединит data + options
-                return self.async_create_entry(title="", data=user_input)
+                return self.async_create_entry(title="", data=user_input)  # type: ignore[return-value]
             errors["base"] = "cannot_connect"
 
         # Форма с предзаполненными текущими значениями
@@ -118,7 +117,7 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
             vol.Optional(CONF_MQTT_PORT,     default=current.get(CONF_MQTT_PORT,   DEFAULT_MQTT_PORT)):   int,
         })
 
-        return self.async_show_form(
+        return self.async_show_form(  # type: ignore[return-value]
             step_id="init",
             data_schema=schema,
             errors=errors,
