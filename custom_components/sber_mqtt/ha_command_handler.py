@@ -258,6 +258,8 @@ class HACommandHandler:
                     _LOGGER.warning(
                         "HVAC %s: неизвестный hvac_air_flow_direction '%s'", device.get("id"), sber_dir
                     )
+
+    async def _handle_vacuum_command(self, device: dict, states: list) -> None:
         """Обрабатывает команды управления пылесосом от Сбера.
 
         Поддерживаемые команды (vacuum_cleaner_command):
