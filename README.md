@@ -292,6 +292,13 @@
 3. Перезапустите Home Assistant
 4. Продолжайте с шага «Настройка интеграции»
 
+## Полезные ссылки
+[Как работает интеграция Sber](https://developers.sber.ru/docs/ru/smarthome/mqtt-diy/integration-scheme)
+
+[Создание интеграции Sber](https://developers.sber.ru/docs/ru/smarthome/mqtt-diy/create-mqtt-diy-integration)
+
+[Telegram с обсужедением интеграции](https://t.me/+k_w9uO0h73FkNjJi)
+
 ## Лицензия
 
 MIT
