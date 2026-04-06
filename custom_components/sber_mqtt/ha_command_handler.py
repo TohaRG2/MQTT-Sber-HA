@@ -258,7 +258,6 @@ class HACommandHandler:
                     _LOGGER.warning(
                         "HVAC %s: неизвестный hvac_air_flow_direction '%s'", device.get("id"), sber_dir
                     )
-
     async def _handle_vacuum_command(self, device: dict, states: list) -> None:
         """Обрабатывает команды управления пылесосом от Сбера.
 
@@ -612,9 +611,14 @@ class HACommandHandler:
         Источник: сущность домена water_heater.
         Поддерживаемые команды:
           on_off                        — включить (water_heater.turn_on) /
-                                          выключить (water_heater.set_operation_mode, mode=off)
+                                          выключить (water_heater.set_operation_mode, mode=off).
+                                          Игнорируется если в той же команде пришла температура.
           kitchen_water_temperature_set — установить целевую температуру
-                                          (water_heater.set_temperature)
+                                          (water_heater.set_temperature).
+                                          set_temperature само включает чайник — turn_on не нужен.
+
+        Логика: если пришла температура — применяем её, on_off игнорируем.
+        Если пришёл только on_off — выполняем как обычно.
         """
         attrs     = device.get("attributes", {})
         entity_id = attrs.get("entity_id", "")
@@ -623,16 +627,51 @@ class HACommandHandler:
             _LOGGER.error("Чайник %s: не задан entity_id", device.get("id"))
             return
 
-        for state in states:
-            key     = state.get("key")
-            val_obj = state.get("value", {})
+        keys = {s.get("key") for s in states}
+        has_temp   = "kitchen_water_temperature_set" in keys
+        has_on_off = "on_off" in keys
 
-            if key == "on_off":
-                is_on = _parse_bool(val_obj)
+        # ── Ветка 1: пришла температура ───────────────────────────────────
+        if has_temp:
+            for state in states:
+                if state.get("key") != "kitchen_water_temperature_set":
+                    continue
+                temp = state.get("value", {}).get("integer_value")
+                if temp is None:
+                    continue
+                try:
+                    temp_f = float(temp)
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Kettle %s: невалидная температура: %s", device.get("id"), temp)
+                    continue
+
+                _LOGGER.info(
+                    "Kettle %s: set_temperature=%.0f, operation_mode=electric → water_heater.set_temperature",
+                    device.get("id"), temp_f,
+                )
+                await self._hass.services.async_call(
+                    domain = "water_heater",
+                    service = "set_operation_mode",
+                    service_data = {"entity_id": entity_id, "operation_mode": "electric"},
+                    blocking=True
+                )
+                await self._hass.services.async_call(
+                    domain = "water_heater",
+                    service = "set_temperature",
+                    service_data = {"entity_id": entity_id, "temperature": temp_f, "operation_mode": "electric"}
+                )
+            return
+
+        # ── Ветка 2: только on_off ────────────────────────────────────────
+        if has_on_off:
+            for state in states:
+                if state.get("key") != "on_off":
+                    continue
+                is_on = _parse_bool(state.get("value", {}))
                 if is_on:
                     _LOGGER.info("Kettle %s: on_off=True → water_heater.turn_on", device.get("id"))
                     await self._hass.services.async_call(
-                        "water_heater", "turn_on", {"entity_id": entity_id}, blocking=False
+                        "water_heater", "turn_on", {"entity_id": entity_id}, blocking=False,
                     )
                 else:
                     _LOGGER.info("Kettle %s: on_off=False → water_heater.set_operation_mode(off)", device.get("id"))
@@ -641,22 +680,3 @@ class HACommandHandler:
                         {"entity_id": entity_id, "operation_mode": "off"},
                         blocking=False,
                     )
-
-            elif key == "kitchen_water_temperature_set":
-                temp = val_obj.get("integer_value")
-                if temp is not None:
-                    try:
-                        temp_f = float(temp)
-                        _LOGGER.info(
-                            "Kettle %s: set_temperature=%.0f → water_heater.set_temperature",
-                            device.get("id"), temp_f
-                        )
-                        await self._hass.services.async_call(
-                            "water_heater", "set_temperature",
-                            {"entity_id": entity_id, "temperature": temp_f},
-                            blocking=False,
-                        )
-                    except (ValueError, TypeError):
-                        _LOGGER.warning(
-                            "Kettle %s: невалидная температура: %s", device.get("id"), temp
-                        )
