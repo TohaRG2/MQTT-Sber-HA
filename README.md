@@ -327,6 +327,8 @@
 - **🗑** — удалить устройство. После удаления оно пропадёт из приложения Салют
 
 ## Полезные ссылки
+[Видеообзор интеграции от "У Павла!"](https://youtu.be/LwezShQFJsI?si=zaLX0DorsX5kBe6B)
+
 [Как работает интеграция Sber](https://developers.sber.ru/docs/ru/smarthome/mqtt-diy/integration-scheme)
 
 [Создание интеграции Sber](https://developers.sber.ru/docs/ru/smarthome/mqtt-diy/create-mqtt-diy-integration)
