@@ -99,6 +99,41 @@
 
 <div class="toast" id="toast"></div>
 
+<script>
+// ── HA Theme Sync ─────────────────────────────────────────────────────────
+// Читаем тему из родительского окна HA (тот же домен, CORS не мешает).
+// Определяем тёмный/светлый режим по яркости --primary-background-color.
+function syncHATheme() {
+  try {
+    const ps = window.parent.getComputedStyle(window.parent.document.documentElement);
+    const bgColor = ps.getPropertyValue('--primary-background-color').trim()
+                 || ps.getPropertyValue('--lovelace-background').trim();
+    const isDark = (() => {
+      if (!bgColor) return false;
+      const tmp = document.createElement('div');
+      tmp.style.color = bgColor;
+      document.body.appendChild(tmp);
+      const rgb = window.getComputedStyle(tmp).color;
+      document.body.removeChild(tmp);
+      const m = rgb.match(/\d+/g);
+      if (!m) return false;
+      const [r, g, b] = m.map(Number);
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+    })();
+    document.documentElement.classList.toggle('ha-dark', isDark);
+  } catch (e) { /* открыт не в iframe — оставляем светлую тему */ }
+}
+function watchHATheme() {
+  try {
+    new MutationObserver(syncHATheme).observe(
+      window.parent.document.documentElement,
+      { attributes: true, attributeFilter: ['style', 'class'] }
+    );
+  } catch (e) { }
+}
+syncHATheme();
+watchHATheme();
+</script>
 <script src="/local/sber_mqtt/panel.js"></script>
 </body>
 </html>

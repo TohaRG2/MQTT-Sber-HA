@@ -2,6 +2,7 @@
    ПЕРЕМЕННЫЕ
 ═══════════════════════════════════════════════════════════ */
 :root {
+  /* Светлая тема по умолчанию */
   --bg:         #f0f2f5;
   --card:       #fff;
   --border:     #e1e4e8;
@@ -13,6 +14,20 @@
   --muted:      #6b7280;
   --radius:     10px;
   --shadow:     0 2px 8px rgba(0,0,0,.08);
+}
+
+/* Тёмная тема — применяется JS при обнаружении тёмного режима HA */
+:root.ha-dark {
+  --bg:         #0d1117;
+  --card:       #161b22;
+  --border:     #30363d;
+  --primary:    #3fb950;
+  --primary-dk: #2ea043;
+  --primary-lt: #1a3a1f;
+  --danger:     #f85149;
+  --text:       #e6edf3;
+  --muted:      #8b949e;
+  --shadow:     0 2px 8px rgba(0,0,0,.3);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -166,7 +181,7 @@ th:nth-child(5), td:nth-child(5) { width: 34%; }
 th:nth-child(6), td:nth-child(6) { width: 32px; text-align: center; padding: 0; }
 
 tr:last-child td  { border-bottom: none; }
-tr:hover td       { background: #fafafa; }
+tr:hover td       { background: var(--bg); }
 td.del-col        { vertical-align: middle; text-align: center; }
 
 .id-cell {
@@ -198,7 +213,7 @@ td.del-col        { vertical-align: middle; text-align: center; }
 .state-cell {
   font-size: 10px;
   font-family: monospace;
-  background: #f6f8fa;
+  background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 6px;
@@ -422,9 +437,9 @@ input:focus, select:focus {
 
 .p-item:last-child         { border-bottom: none; }
 .p-item:hover, .p-item.sel { background: var(--primary-lt); }
-.p-item.used               { background: #fff8e1; }
+.p-item.used               { background: color-mix(in srgb, var(--bg) 80%, #f57f17 20%); }
 .p-item.used:hover,
-.p-item.used.sel           { background: #fff3cd; }
+.p-item.used.sel           { background: color-mix(in srgb, var(--bg) 70%, #f57f17 30%); }
 
 .p-used-badge {
   font-size: 9px;
@@ -439,8 +454,8 @@ input:focus, select:focus {
 }
 
 .dom-badge {
-  background: #e3f2fd;
-  color: #1565c0;
+  background: var(--primary-lt);
+  color: var(--primary-dk);
   padding: 2px 7px;
   border-radius: 20px;
   font-size: 10px;
@@ -497,7 +512,7 @@ input:focus, select:focus {
    ДИАЛОГ ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ
 ═══════════════════════════════════════════════════════════ */
 .conf-box {
-  background: #fff;
+  background: var(--card);
   border-radius: 12px;
   padding: 22px;
   max-width: 360px;
