@@ -177,6 +177,7 @@ class SberMQTTClient:
         if self._client and self._connected:
             self._client.publish(topic, payload, qos=0)
             _LOGGER.info("MQTT → %s | payload: %s", topic, payload)
+            self._devtools_publish_hook(topic, payload)
         else:
             _LOGGER.warning(
                 "MQTT publish skipped: not connected | topic: %s | connected: %s | client: %s",
@@ -303,6 +304,15 @@ class SberMQTTClient:
         try:
             from .api_views import devtools_on_command
             devtools_on_command(topic, payload_str)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _devtools_publish_hook(topic: str, payload_str: str) -> None:
+        """Отправляет исходящее сообщение в буфер DevTools (без исключений)."""
+        try:
+            from .api_views import devtools_on_publish
+            devtools_on_publish(topic, payload_str)
         except Exception:
             pass
 
