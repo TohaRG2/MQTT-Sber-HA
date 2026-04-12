@@ -344,11 +344,37 @@ class SberConnectionStatusView(HomeAssistantView):
 
         mqtt_client = data["mqtt_client"]
         registry    = data["device_registry"]
-        config      = data["config"]
 
-        return web.json_response({
-            "connected":     mqtt_client.is_connected,
-            "broker":        config.get("mqtt_broker", ""),
-            "login":         config.get("mqtt_login", ""),
-            "devices_count": len(registry.devices),
-        })
+        info = mqtt_client.connection_info
+        info["devices_count"] = len(registry.devices)
+        return web.json_response(info)
+
+
+class SberDevReconnectView(HomeAssistantView):
+    """Принудительное переподключение к MQTT брокеру.
+
+    POST /api/sber_mqtt/dev/reconnect
+    Отключается от брокера и подключается заново с теми же учётными данными.
+    Возвращает обновлённый connection_info после попытки подключения.
+    """
+
+    url  = "/api/sber_mqtt/dev/reconnect"
+    name = "api:sber_mqtt:dev:reconnect"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        data = _get_entry_data(hass)
+        if not data:
+            return web.json_response({"error": "Integration not loaded"}, status=503)
+
+        mqtt_client = data["mqtt_client"]
+        _LOGGER.info("DevTools: принудительное переподключение к MQTT")
+        ok = await hass.async_add_executor_job(mqtt_client.reconnect)
+
+        info = mqtt_client.connection_info
+        info["reconnect_ok"] = ok
+        return web.json_response(info)

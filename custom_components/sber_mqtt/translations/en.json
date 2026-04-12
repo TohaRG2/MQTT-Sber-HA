@@ -1,0 +1,40 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to Sber MQTT",
+        "description": "Enter the credentials for connecting to the Sber MQTT broker.\n\nA Long-Lived Access Token can be created in your HA profile: Profile → Long-Lived Access Tokens → Create Token.",
+        "data": {
+          "mqtt_login": "MQTT Login",
+          "mqtt_password": "MQTT Password",
+          "mqtt_broker": "Broker Address",
+          "mqtt_port": "Port",
+          "ha_token": "Long-Lived Access Token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Could not connect to the MQTT broker. Please check your credentials.",
+      "invalid_auth": "Invalid login or password.",
+      "unknown": "Unknown error."
+    },
+    "abort": {
+      "already_configured": "Integration is already configured.",
+      "cannot_connect": "Could not connect to the MQTT broker."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Connection Settings",
+        "data": {
+          "mqtt_login": "MQTT Login",
+          "mqtt_password": "MQTT Password",
+          "mqtt_broker": "Broker Address",
+          "mqtt_port": "Port",
+          "ha_token": "Long-Lived Access Token"
+        }
+      }
+    }
+  }
+}

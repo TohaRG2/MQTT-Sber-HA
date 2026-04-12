@@ -1,0 +1,1012 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sber MQTT — Dev Tools</title>
+<style>
+:root{
+  /* Тёмная тема по умолчанию — переопределяется JS из темы HA */
+  --bg:#0d1117;--card:#161b22;--card2:#1c2128;--border:#30363d;
+  --primary:#238636;--primary-lt:#1a4a2e;--primary-text:#3fb950;
+  --accent:#58a6ff;--accent-lt:#1a2e4a;
+  --warn:#d29922;--warn-lt:#2e2408;
+  --danger:#f85149;--danger-lt:#3a1010;
+  --text:#e6edf3;--muted:#8b949e;--muted2:#484f58;
+  --radius:8px;--mono:'JetBrains Mono','Fira Code','Cascadia Code',monospace;
+}
+:root.ha-light{
+  --bg:#f8f9fa;--card:#ffffff;--card2:#f1f3f5;--border:#dee2e6;
+  --primary:#2e7d32;--primary-lt:#e8f5e9;--primary-text:#2e7d32;
+  --accent:#1565c0;--accent-lt:#e3f2fd;
+  --warn:#f57f17;--warn-lt:#fff8e1;
+  --danger:#c62828;--danger-lt:#ffebee;
+  --text:#212529;--muted:#6c757d;--muted2:#adb5bd;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:13px}
+
+/* ── Header ── */
+.hdr{background:var(--card);border-bottom:1px solid var(--border);height:52px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;position:sticky;top:0;z-index:100}
+.hdr-l{display:flex;align-items:center;gap:10px}
+.back-btn{display:flex;align-items:center;gap:6px;color:var(--muted);text-decoration:none;font-size:12px;padding:5px 8px;border-radius:6px;border:1px solid var(--border);background:transparent;cursor:pointer;transition:all .15s}
+.back-btn:hover{color:var(--text);border-color:var(--muted2)}
+.hdr-title{display:flex;align-items:center;gap:8px}
+.dev-badge{background:var(--warn-lt);color:var(--warn);border:1px solid var(--warn);border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px;letter-spacing:.5px}
+.hdr-right{display:flex;align-items:center;gap:8px}
+.conn-pill{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);background:var(--card2);padding:3px 10px;border-radius:20px;border:1px solid var(--border)}
+.dot{width:6px;height:6px;border-radius:50%;background:#555;transition:background .3s}
+.dot.ok{background:var(--primary-text)}.dot.err{background:var(--danger)}
+
+/* ── Layout ── */
+.layout{display:grid;grid-template-columns:200px 1fr;min-height:calc(100vh - 52px)}
+.sidebar{background:var(--card);border-right:1px solid var(--border);padding:12px 8px}
+.nav-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:6px;cursor:pointer;color:var(--muted);font-size:12px;font-weight:500;transition:all .15s;border:none;background:none;width:100%;text-align:left}
+.nav-item:hover{background:var(--card2);color:var(--text)}
+.nav-item.active{background:var(--accent-lt);color:var(--accent)}
+.nav-item svg{flex-shrink:0;opacity:.7}
+.nav-sep{height:1px;background:var(--border);margin:8px 4px}
+.nav-section{font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--muted2);padding:8px 10px 4px}
+.content{padding:20px;min-height:calc(100vh - 52px)}
+
+/* ── Panels ── */
+.panel{display:none}.panel.active{display:block}
+.panel-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:8px}
+.panel-title{font-size:15px;font-weight:600;color:var(--text)}
+.panel-desc{font-size:11px;color:var(--muted);margin-top:2px}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;margin-bottom:16px}
+.card-hdr{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.card-title{font-size:12px;font-weight:600;color:var(--text);display:flex;align-items:center;gap:6px}
+.card-body{padding:16px}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:6px 14px;border-radius:6px;border:none;cursor:pointer;font-size:12px;font-weight:500;transition:all .15s;line-height:1.4}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover:not(:disabled){filter:brightness(1.2)}
+.btn-accent{background:var(--accent-lt);color:var(--accent);border:1px solid #1f3a5a}.btn-accent:hover:not(:disabled){background:#1f3a5a}
+.btn-ghost{background:var(--card2);color:var(--muted);border:1px solid var(--border)}.btn-ghost:hover:not(:disabled){color:var(--text);border-color:var(--muted2)}
+.btn-danger{background:var(--danger-lt);color:var(--danger);border:1px solid #5c1515}.btn-danger:hover:not(:disabled){background:#5c1515}
+.btn-warn{background:var(--warn-lt);color:var(--warn);border:1px solid #4a3200}.btn-warn:hover:not(:disabled){background:#4a3200}
+.btn-sm{padding:4px 10px;font-size:11px}
+.btn-group{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ── JSON Editor ── */
+.json-editor{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;font-family:var(--mono);font-size:12px;line-height:1.6;color:var(--text);resize:vertical;min-height:300px;outline:none;transition:border-color .15s}
+.json-editor:focus{border-color:var(--accent)}
+.json-editor.error{border-color:var(--danger)}
+.json-status{font-size:11px;margin-top:4px;height:16px;font-family:var(--mono)}
+.json-status.ok{color:var(--primary-text)}.json-status.err{color:var(--danger)}
+
+/* ── Device selector ── */
+.device-select{background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--text);width:100%;outline:none;cursor:pointer}
+.device-select:focus{border-color:var(--accent)}
+
+/* ── Commands log ── */
+.cmd-log{background:var(--bg);border:1px solid var(--border);border-radius:6px;height:480px;overflow-y:auto;font-family:var(--mono);font-size:11px}
+.cmd-entry{border-bottom:1px solid var(--border);padding:8px 12px;cursor:pointer;transition:background .1s}
+.cmd-entry:last-child{border-bottom:none}
+.cmd-entry:hover{background:var(--card2)}
+.cmd-entry.expanded{background:var(--card2)}
+.cmd-meta{display:flex;align-items:center;gap:10px;margin-bottom:0}
+.cmd-ts{color:var(--muted);font-size:10px;white-space:nowrap}
+.cmd-topic{color:var(--accent);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.cmd-preview{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}
+.cmd-detail{margin-top:8px;display:none}
+.cmd-detail pre{background:var(--card);border:1px solid var(--border);border-radius:4px;padding:10px;overflow-x:auto;white-space:pre-wrap;word-break:break-all;color:var(--text);line-height:1.5}
+.cmd-entry.expanded .cmd-detail{display:block}
+.cmd-empty{text-align:center;padding:60px 20px;color:var(--muted)}
+
+/* ── Direction arrows in command log ── */
+.cmd-dir{font-size:10px;font-weight:700;padding:1px 5px;border-radius:4px;flex-shrink:0;letter-spacing:.3px}
+.cmd-dir-in{background:var(--accent-lt);color:var(--accent)}
+.cmd-dir-out{background:var(--primary-lt);color:var(--primary-text)}
+.cmd-entry.out{border-left:2px solid var(--primary-text)}
+.cmd-entry.in{border-left:2px solid var(--accent)}
+
+/* ── Stream indicator ── */
+.stream-pill{display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:3px 10px;border-radius:20px;border:1px solid var(--border);background:var(--card2);color:var(--muted)}
+.stream-pill.live{border-color:var(--primary-text);color:var(--primary-text);background:var(--primary-lt)}
+.stream-pill .blink{width:6px;height:6px;border-radius:50%;background:currentColor;animation:blink 1.2s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.2}}
+
+/* ── Status / result chips ── */
+.result-box{margin-top:12px;padding:10px 14px;border-radius:6px;font-family:var(--mono);font-size:11px;line-height:1.6;display:none}
+.result-box.ok{background:var(--primary-lt);border:1px solid #1a4a2e;color:var(--primary-text)}
+.result-box.err{background:var(--danger-lt);border:1px solid #5c1515;color:var(--danger)}
+.result-box.show{display:block}
+pre.result{white-space:pre-wrap;word-break:break-all}
+
+/* ── Split view ── */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:900px){.split{grid-template-columns:1fr}.layout{grid-template-columns:1fr}.sidebar{display:none}}
+
+/* ── Misc ── */
+label.fg-label{display:block;font-size:11px;font-weight:600;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.4px}
+.hint{font-size:10px;color:var(--muted2);margin-top:3px}
+.badge{display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600}
+.badge-count{background:var(--card2);color:var(--muted);border:1px solid var(--border)}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(30px);background:var(--card);border:1px solid var(--border);color:var(--text);padding:8px 18px;border-radius:8px;font-size:12px;opacity:0;transition:all .25s;z-index:999;white-space:nowrap;box-shadow:0 4px 20px rgba(0,0,0,.4)}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.ok{border-color:var(--primary-text);color:var(--primary-text)}
+.toast.err{border-color:var(--danger);color:var(--danger)}
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="hdr">
+  <div class="hdr-l">
+    <a class="back-btn" href="/api/sber_mqtt/panel">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></svg>
+      Назад
+    </a>
+    <div class="hdr-title">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="var(--warn)"><path d="M22.7 19l-9.1-9.1c.9-2.3.4-5-1.5-6.9-2-2-5-2.4-7.4-1.3L9 6 6 9 1.6 4.7C.4 7.1.9 10.1 2.9 12.1c1.9 1.9 4.6 2.4 6.9 1.5l9.1 9.1c.4.4 1 .4 1.4 0l2.3-2.3c.5-.4.5-1.1.1-1.4z"/></svg>
+      <span style="font-size:14px;font-weight:600">Developer Tools</span>
+      <span class="dev-badge">DEV</span>
+    </div>
+  </div>
+  <div class="hdr-right">
+    <div class="conn-pill">
+      <div class="dot" id="dot"></div>
+      <span id="connText">…</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Layout ── -->
+<div class="layout">
+
+  <!-- Sidebar -->
+  <div class="sidebar">
+    <div class="nav-section">MQTT</div>
+    <button class="nav-item active" data-panel="config" onclick="switchPanel('config')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H4v-2h11v2zm3-4H4v-2h14v2zm0-4H4V7h14v2z"/></svg>
+      Конфиг устройств
+    </button>
+    <button class="nav-item" data-panel="state" onclick="switchPanel('state')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-1 14H9V8h2v8zm4 0h-2V8h2v8z"/></svg>
+      Состояния
+    </button>
+    <div class="nav-sep"></div>
+    <div class="nav-section">Отладка</div>
+    <button class="nav-item" data-panel="connection" onclick="switchPanel('connection')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+      Соединение
+    </button>
+    <button class="nav-item" data-panel="commands" onclick="switchPanel('commands')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H6l-2 2V4h16v12z"/></svg>
+      Команды ←Сбер
+      <span class="badge badge-count" id="cmdCountBadge">0</span>
+    </button>
+  </div>
+
+  <!-- Content -->
+  <div class="content">
+
+    <!-- ══ PANEL: Config ══ -->
+    <div class="panel active" id="panel-config">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Конфигурация устройств</div>
+          <div class="panel-desc">JSON payload который отправляется в топик up/config</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" onclick="loadConfig()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            Перезагрузить
+          </button>
+          <button class="btn btn-ghost btn-sm" onclick="formatConfig()">{ } Форматировать</button>
+          <button class="btn btn-accent btn-sm" onclick="publishConfig()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l23-9L2 3v7l15 2-15 2z"/></svg>
+            Отправить в Сбер
+          </button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M20 3H4c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z"/></svg>
+            up/config payload
+          </div>
+          <span class="badge badge-count" id="configDevCount">—</span>
+        </div>
+        <div class="card-body">
+          <textarea class="json-editor" id="configEditor" spellcheck="false" oninput="validateJson('configEditor','configStatus')"></textarea>
+          <div class="json-status" id="configStatus"></div>
+        </div>
+      </div>
+
+      <div class="result-box" id="configResult"></div>
+
+      <div class="card" style="border-color:var(--warn-lt)">
+        <div class="card-hdr">
+          <div class="card-title" style="color:var(--warn)">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            Осторожно
+          </div>
+        </div>
+        <div class="card-body" style="color:var(--muted);font-size:11px;line-height:1.7">
+          Редактирование и отправка произвольного конфига может нарушить синхронизацию состояний
+          между HA и Сбером. При следующем рестарте интеграция восстановит корректный конфиг автоматически.
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PANEL: State ══ -->
+    <div class="panel" id="panel-state">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Состояния устройств</div>
+          <div class="panel-desc">Просмотр и отправка произвольного payload в up/status</div>
+        </div>
+      </div>
+
+      <div class="split">
+        <!-- Левая колонка: выбор устройства и просмотр -->
+        <div>
+          <div class="card">
+            <div class="card-hdr">
+              <div class="card-title">Выбрать устройство</div>
+            </div>
+            <div class="card-body">
+              <label class="fg-label">Устройство</label>
+              <select class="device-select" id="stateDeviceSelect" onchange="loadDeviceState()">
+                <option value="">— Выберите устройство —</option>
+              </select>
+              <div class="hint" style="margin-top:6px">Загружает текущий payload состояния из HA</div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-hdr">
+              <div class="card-title">Последнее отправленное (last_state)</div>
+            </div>
+            <div class="card-body">
+              <pre id="lastStateView" style="font-family:var(--mono);font-size:11px;color:var(--muted);line-height:1.5;white-space:pre-wrap;word-break:break-all;min-height:60px">—</pre>
+            </div>
+          </div>
+        </div>
+
+        <!-- Правая колонка: редактор и отправка -->
+        <div>
+          <div class="card">
+            <div class="card-hdr">
+              <div class="card-title">up/status payload</div>
+              <div class="btn-group">
+                <button class="btn btn-ghost btn-sm" onclick="formatState()">{ } Format</button>
+                <button class="btn btn-accent btn-sm" onclick="publishState()">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M2 21l23-9L2 3v7l15 2-15 2z"/></svg>
+                  Отправить в Сбер
+                </button>
+              </div>
+            </div>
+            <div class="card-body">
+              <textarea class="json-editor" id="stateEditor" spellcheck="false" style="min-height:380px" oninput="validateJson('stateEditor','stateStatus')"></textarea>
+              <div class="json-status" id="stateStatus"></div>
+            </div>
+          </div>
+          <div class="result-box" id="stateResult"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══ PANEL: Connection ══ -->
+    <div class="panel" id="panel-connection">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Соединение с MQTT брокером</div>
+          <div class="panel-desc">Статус подключения, детали последней ошибки и принудительное переподключение</div>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-ghost btn-sm" onclick="loadConnectionInfo()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            Обновить
+          </button>
+          <button class="btn btn-accent btn-sm" id="reconnectBtn" onclick="doReconnect()">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M1 9l2 2c4.97-4.97 13.03-4.97 18 0l2-2C16.93 2.93 7.08 2.93 1 9zm8 8l3 3 3-3c-1.65-1.66-4.34-1.66-6 0zm-4-4l2 2c2.76-2.76 7.24-2.76 10 0l2-2C15.14 9.14 8.87 9.14 5 13z"/></svg>
+            Переподключиться
+          </button>
+        </div>
+      </div>
+
+      <!-- Статус -->
+      <div class="card" id="connStatusCard">
+        <div class="card-hdr">
+          <div class="card-title">Статус</div>
+          <span id="connStatusBadge" style="font-size:11px;font-weight:600;padding:2px 10px;border-radius:12px;background:var(--card2);color:var(--muted);border:1px solid var(--border)">…</span>
+        </div>
+        <div class="card-body" style="display:grid;grid-template-columns:1fr 1fr;gap:12px 24px">
+          <div>
+            <div class="fg-label">Брокер</div>
+            <div id="ci-broker" style="font-family:var(--mono);font-size:12px;color:var(--text)">—</div>
+          </div>
+          <div>
+            <div class="fg-label">Логин</div>
+            <div id="ci-login" style="font-family:var(--mono);font-size:12px;color:var(--text)">—</div>
+          </div>
+          <div>
+            <div class="fg-label">Последнее подключение</div>
+            <div id="ci-connected-time" style="font-size:12px;color:var(--text)">—</div>
+          </div>
+          <div>
+            <div class="fg-label">Устройств в реестре</div>
+            <div id="ci-devices" style="font-size:12px;color:var(--text)">—</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Последняя ошибка -->
+      <div class="card" id="connErrorCard" style="display:none;border-color:var(--danger)">
+        <div class="card-hdr">
+          <div class="card-title" style="color:var(--danger)">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></svg>
+            Последняя ошибка
+          </div>
+          <span id="ci-error-time" style="font-size:10px;color:var(--muted)"></span>
+        </div>
+        <div class="card-body">
+          <div id="ci-error-msg" style="font-family:var(--mono);font-size:12px;color:var(--danger);line-height:1.6;white-space:pre-wrap;word-break:break-all"></div>
+          <div style="margin-top:10px;font-size:11px;color:var(--muted);line-height:1.6" id="ci-error-hint"></div>
+        </div>
+      </div>
+
+      <!-- Результат переподключения -->
+      <div class="result-box" id="reconnectResult"></div>
+    </div>
+
+    <!-- ══ PANEL: Commands ══ -->
+    <div class="panel" id="panel-commands">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Входящие команды от Сбера</div>
+          <div class="panel-desc">Топики down/commands, down/status_request, down/config_request, down/errors</div>
+        </div>
+        <div class="btn-group">
+          <div class="stream-pill" id="streamPill">
+            <span class="blink" style="display:none" id="streamBlink"></span>
+            <span id="streamStatus">● offline</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="streamToggleBtn" onclick="toggleStream()">▶ Подключиться</button>
+          <button class="btn btn-danger btn-sm" onclick="clearCommands()">🗑 Очистить</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">Фильтр</div>
+          <label style="display:flex;align-items:center;gap:8px;font-size:11px;color:var(--muted);cursor:pointer">
+            <input type="checkbox" id="autoScrollChk" checked onchange=""> Автопрокрутка
+          </label>
+        </div>
+        <div class="card-body" style="display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted2);min-width:60px">Направление</span>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="dir-filter" value="in" checked onchange="renderCommands()">
+              <span class="cmd-dir cmd-dir-in">← in</span> Сбер → HA
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="dir-filter" value="out" checked onchange="renderCommands()">
+              <span class="cmd-dir cmd-dir-out">→ out</span> HA → Сбер
+            </label>
+          </div>
+          <div style="height:1px;background:var(--border)"></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted2);min-width:60px">Топики ←</span>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="commands" checked onchange="renderCommands()"> commands
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="status_request" checked onchange="renderCommands()"> status_request
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="config_request" checked onchange="renderCommands()"> config_request
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="errors" checked onchange="renderCommands()"> errors
+            </label>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted2);min-width:60px">Топики →</span>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="up/status" checked onchange="renderCommands()"> up/status
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="topic-filter" value="up/config" checked onchange="renderCommands()"> up/config
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">Лог команд</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <span class="badge badge-count" id="cmdLogCount">0 записей</span>
+            <button class="btn btn-ghost btn-sm" onclick="exportCommands()" title="Скачать лог как .txt файл">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>
+              Экспорт лога
+            </button>
+          </div>
+        </div>
+        <div class="cmd-log" id="cmdLog">
+          <div class="cmd-empty">Нет команд. Подключитесь к стриму или дождитесь входящих данных.</div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /layout -->
+
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = window.HA_ACCESS_TOKEN || '';
+const API   = '/api/sber_mqtt';
+
+// ── Навигация ──────────────────────────────────────────────────────────────
+function switchPanel(name) {
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  document.querySelector(`[data-panel="${name}"]`).classList.add('active');
+  if (name === 'commands' && !streamActive) loadCommandsHistory();
+  if (name === 'state') loadStateDevices();
+  if (name === 'connection') loadConnectionInfo();
+}
+
+// ── API helpers ────────────────────────────────────────────────────────────
+async function apiFetch(path, opts = {}) {
+  const res = await fetch(API + path, {
+    headers: { 'Authorization': 'Bearer ' + TOKEN, 'Content-Type': 'application/json', ...(opts.headers || {}) },
+    ...opts,
+  });
+  if (!res.ok) {
+    const t = await res.text();
+    throw new Error(`HTTP ${res.status}: ${t}`);
+  }
+  return res.json();
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+let toastT;
+function toast(msg, type = '') {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type + ' show';
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+// ── Status ─────────────────────────────────────────────────────────────────
+async function loadStatus() {
+  try {
+    const d = await apiFetch('/status');
+    const dot = document.getElementById('dot');
+    const txt = document.getElementById('connText');
+    dot.className = 'dot ' + (d.connected ? 'ok' : 'err');
+    txt.textContent = d.connected ? `${d.login} @ ${d.broker}` : 'Отключён';
+  } catch { }
+}
+
+// ── JSON validation ────────────────────────────────────────────────────────
+function validateJson(editorId, statusId) {
+  const val = document.getElementById(editorId).value.trim();
+  const st  = document.getElementById(statusId);
+  if (!val) { st.textContent = ''; st.className = 'json-status'; return null; }
+  try {
+    const parsed = JSON.parse(val);
+    st.textContent = '✓ Валидный JSON';
+    st.className = 'json-status ok';
+    document.getElementById(editorId).classList.remove('error');
+    return parsed;
+  } catch (e) {
+    st.textContent = '✗ ' + e.message;
+    st.className = 'json-status err';
+    document.getElementById(editorId).classList.add('error');
+    return null;
+  }
+}
+
+function showResult(boxId, ok, data) {
+  const el = document.getElementById(boxId);
+  el.className = 'result-box show ' + (ok ? 'ok' : 'err');
+  el.innerHTML = `<pre class="result">${JSON.stringify(data, null, 2)}</pre>`;
+}
+
+// ══ CONFIG PANEL ════════════════════════════════════════════════════════════
+
+async function loadConfig() {
+  try {
+    const d = await apiFetch('/dev/config_raw');
+    const pretty = JSON.stringify(d.payload, null, 2);
+    document.getElementById('configEditor').value = pretty;
+    validateJson('configEditor', 'configStatus');
+    const cnt = d.payload?.devices?.length ?? d.devices_count;
+    document.getElementById('configDevCount').textContent = cnt + ' устройств';
+    toast('Конфиг загружен', 'ok');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+function formatConfig() {
+  const parsed = validateJson('configEditor', 'configStatus');
+  if (parsed) document.getElementById('configEditor').value = JSON.stringify(parsed, null, 2);
+}
+
+async function publishConfig() {
+  const parsed = validateJson('configEditor', 'configStatus');
+  if (!parsed) { toast('Исправьте JSON перед отправкой', 'err'); return; }
+  try {
+    const d = await apiFetch('/dev/config_raw', { method: 'POST', body: JSON.stringify(parsed) });
+    showResult('configResult', true, d);
+    toast('Конфиг отправлен в Сбер ✓', 'ok');
+  } catch (e) {
+    showResult('configResult', false, { error: e.message });
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+// ══ STATE PANEL ═════════════════════════════════════════════════════════════
+
+let stateDevices = [];
+
+async function loadStateDevices() {
+  try {
+    const d = await apiFetch('/devices');
+    stateDevices = d.devices || [];
+    const sel = document.getElementById('stateDeviceSelect');
+    sel.innerHTML = '<option value="">— Выберите устройство —</option>';
+    stateDevices.forEach(dev => {
+      const o = document.createElement('option');
+      o.value = dev.id;
+      o.textContent = `${dev.name} (${dev.id}) — ${dev.device_type}`;
+      sel.appendChild(o);
+    });
+  } catch (e) {
+    toast('Не удалось загрузить устройства: ' + e.message, 'err');
+  }
+}
+
+async function loadDeviceState() {
+  const devId = document.getElementById('stateDeviceSelect').value;
+  if (!devId) { return; }
+  try {
+    const d = await apiFetch('/dev/state/' + devId);
+    // Правая колонка — полный payload
+    const payload = d.payload || { devices: { [devId]: { states: [] } } };
+    document.getElementById('stateEditor').value = JSON.stringify(payload, null, 2);
+    validateJson('stateEditor', 'stateStatus');
+    // Левая колонка — last_state
+    const lastState = d.last_state;
+    document.getElementById('lastStateView').textContent =
+      lastState && Object.keys(lastState).length
+        ? JSON.stringify(lastState, null, 2)
+        : '(нет данных)';
+    toast('Состояние загружено', 'ok');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+function formatState() {
+  const parsed = validateJson('stateEditor', 'stateStatus');
+  if (parsed) document.getElementById('stateEditor').value = JSON.stringify(parsed, null, 2);
+}
+
+async function publishState() {
+  const parsed = validateJson('stateEditor', 'stateStatus');
+  if (!parsed) { toast('Исправьте JSON перед отправкой', 'err'); return; }
+
+  // Добавляем device_id в тело чтобы сервер обновил last_state
+  const devId = document.getElementById('stateDeviceSelect').value;
+  const body = { ...parsed };
+  if (devId) body._device_id = devId;
+
+  try {
+    const d = await apiFetch('/dev/state_raw', { method: 'POST', body: JSON.stringify(body) });
+    showResult('stateResult', true, d);
+    toast('Состояние отправлено в Сбер ✓', 'ok');
+    if (devId) {
+      // Обновим last_state в UI
+      const statesObj = parsed?.devices?.[devId];
+      if (statesObj) document.getElementById('lastStateView').textContent = JSON.stringify(statesObj, null, 2);
+    }
+  } catch (e) {
+    showResult('stateResult', false, { error: e.message });
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+// ══ CONNECTION PANEL ════════════════════════════════════════════════════════
+
+const ERROR_HINTS = {
+  'rc=4':         'Неверный логин или пароль. Проверьте учётные данные в настройках интеграции.',
+  'rc=5':         'Нет авторизации. Возможно, этот логин не имеет доступа к брокеру.',
+  'rc=3':         'Сервер недоступен. Проверьте адрес брокера и сетевое соединение.',
+  'rc=2':         'Client ID отклонён брокером.',
+  'rc=1':         'Несовместимая версия протокола MQTT.',
+  'Таймаут':      'Брокер не ответил за 10 секунд. Проверьте адрес хоста, порт и доступность сети.',
+  'Name or service not known': 'Адрес брокера не найден в DNS. Проверьте правильность hostname.',
+  'nodename nor servname':     'Адрес брокера не найден в DNS. Проверьте правильность hostname.',
+  'Connection refused':        'Соединение отклонено. Проверьте порт и доступность хоста.',
+  'timed out':                 'Таймаут сети. Хост недоступен или порт заблокирован файрволом.',
+  'CERTIFICATE':               'Ошибка TLS сертификата.',
+  'SSL':                       'Ошибка TLS/SSL при установке зашифрованного соединения.',
+  'Network is unreachable':    'Сеть недоступна. Проверьте интернет-соединение Home Assistant.',
+};
+
+function getErrorHint(msg) {
+  if (!msg) return '';
+  for (const [key, hint] of Object.entries(ERROR_HINTS)) {
+    if (msg.includes(key)) return hint;
+  }
+  return '';
+}
+
+function fmtDatetime(ts) {
+  if (!ts) return '—';
+  return new Date(ts * 1000).toLocaleString('ru-RU', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+}
+
+function renderConnectionInfo(info) {
+  const connected = info.connected;
+
+  // Badge
+  const badge = document.getElementById('connStatusBadge');
+  if (connected) {
+    badge.textContent = '● Подключено';
+    badge.style.background = 'var(--primary-lt)';
+    badge.style.color = 'var(--primary-text)';
+    badge.style.borderColor = 'var(--primary-text)';
+  } else {
+    badge.textContent = '✕ Не подключено';
+    badge.style.background = 'var(--danger-lt)';
+    badge.style.color = 'var(--danger)';
+    badge.style.borderColor = 'var(--danger)';
+  }
+
+  // Fields
+  document.getElementById('ci-broker').textContent =
+    (info.broker && info.port) ? `${info.broker}:${info.port}` : (info.broker || '—');
+  document.getElementById('ci-login').textContent = info.login || '—';
+  document.getElementById('ci-connected-time').textContent = fmtDatetime(info.last_connected_time);
+  document.getElementById('ci-devices').textContent =
+    info.devices_count != null ? info.devices_count + ' шт.' : '—';
+
+  // Error card
+  const errCard = document.getElementById('connErrorCard');
+  if (info.last_error) {
+    errCard.style.display = '';
+    document.getElementById('ci-error-msg').textContent = info.last_error;
+    document.getElementById('ci-error-time').textContent = fmtDatetime(info.last_error_time);
+    const hint = getErrorHint(info.last_error);
+    const hintEl = document.getElementById('ci-error-hint');
+    hintEl.textContent = hint ? '💡 ' + hint : '';
+    hintEl.style.display = hint ? '' : 'none';
+  } else {
+    errCard.style.display = 'none';
+  }
+}
+
+async function loadConnectionInfo() {
+  try {
+    const info = await apiFetch('/status');
+    renderConnectionInfo(info);
+  } catch (e) {
+    toast('Не удалось загрузить статус: ' + e.message, 'err');
+  }
+}
+
+async function doReconnect() {
+  const btn = document.getElementById('reconnectBtn');
+  btn.disabled = true;
+  btn.textContent = '⏳ Подключение…';
+  const resultBox = document.getElementById('reconnectResult');
+  resultBox.className = 'result-box';
+  resultBox.style.display = 'none';
+
+  try {
+    const info = await apiFetch('/dev/reconnect', { method: 'POST' });
+    renderConnectionInfo(info);
+    if (info.reconnect_ok) {
+      showResult('reconnectResult', true, { status: 'Подключение успешно установлено' });
+      toast('MQTT подключён ✓', 'ok');
+    } else {
+      showResult('reconnectResult', false, {
+        status: 'Не удалось подключиться',
+        error: info.last_error || 'Неизвестная ошибка',
+      });
+      toast('Не удалось подключиться', 'err');
+    }
+  } catch (e) {
+    showResult('reconnectResult', false, { error: e.message });
+    toast('Ошибка: ' + e.message, 'err');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = 'Переподключиться';
+  }
+}
+
+// ══ COMMANDS PANEL ══════════════════════════════════════════════════════════
+
+let commands = [];
+let streamActive = false;
+let eventSource = null;
+let cmdCount = 0;
+
+function getEnabledTopics() {
+  const checked = [];
+  document.querySelectorAll('.topic-filter:checked').forEach(el => checked.push(el.value));
+  return checked;
+}
+
+function getEnabledDirs() {
+  const checked = [];
+  document.querySelectorAll('.dir-filter:checked').forEach(el => checked.push(el.value));
+  return checked;
+}
+
+function topicMatches(topic) {
+  const enabled = getEnabledTopics();
+  return enabled.some(kw => topic.includes(kw));
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toTimeString().slice(0, 8) + '.' + String(d.getMilliseconds()).padStart(3, '0');
+}
+
+function renderCommands() {
+  const log = document.getElementById('cmdLog');
+  const enabledDirs = getEnabledDirs();
+  const filtered = commands.filter(c => {
+    const dir = c.direction || 'in';
+    if (!enabledDirs.includes(dir)) return false;
+    return topicMatches(c.topic);
+  });
+  document.getElementById('cmdLogCount').textContent = filtered.length + ' записей';
+  document.getElementById('cmdCountBadge').textContent = commands.length;
+
+  if (!filtered.length) {
+    log.innerHTML = '<div class="cmd-empty">Нет сообщений по выбранным фильтрам.</div>';
+    return;
+  }
+
+  log.innerHTML = filtered.slice().reverse().map((c, i) => {
+    const dir = c.direction || 'in';
+    const isOut = dir === 'out';
+    const preview = JSON.stringify(c.payload).slice(0, 120);
+    const topicParts = c.topic.split('/');
+    const topicShort = topicParts.slice(-2).join('/');
+    const dirBadge = isOut
+      ? `<span class="cmd-dir cmd-dir-out">→ out</span>`
+      : `<span class="cmd-dir cmd-dir-in">← in</span>`;
+    const arrow = isOut ? '↑' : '↓';
+    return `<div class="cmd-entry ${dir}" id="cmd-${i}" onclick="toggleCmd(${i})">
+      <div class="cmd-meta">
+        <span class="cmd-ts">${fmtTime(c.ts)}</span>
+        ${dirBadge}
+        <span class="cmd-topic" title="${escH(c.topic)}">${arrow} …/${escH(topicShort)}</span>
+      </div>
+      <div class="cmd-preview">${escH(preview)}${preview.length < JSON.stringify(c.payload).length ? '…' : ''}</div>
+      <div class="cmd-detail">
+        <div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+        <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>
+      </div>
+    </div>`;
+  }).join('');
+
+  if (document.getElementById('autoScrollChk').checked) {
+    log.scrollTop = 0;
+  }
+}
+
+function toggleCmd(i) {
+  // i — индекс в отфильтрованном reversed массиве
+  const el = document.getElementById('cmd-' + i);
+  if (el) el.classList.toggle('expanded');
+}
+
+async function loadCommandsHistory() {
+  try {
+    const d = await apiFetch('/dev/commands/history?limit=100');
+    commands = d.commands || [];
+    renderCommands();
+  } catch (e) { }
+}
+
+function addCommand(cmd) {
+  commands.push(cmd);
+  if (commands.length > 200) commands.splice(0, commands.length - 200);
+  renderCommands();
+}
+
+function toggleStream() {
+  if (streamActive) {
+    stopStream();
+  } else {
+    startStream();
+  }
+}
+
+function startStream() {
+  const url = `${API}/dev/commands/stream?token=${encodeURIComponent(TOKEN)}&backlog=50`;
+  eventSource = new EventSource(url);
+
+  eventSource.onopen = () => {
+    streamActive = true;
+    document.getElementById('streamToggleBtn').textContent = '■ Отключиться';
+    document.getElementById('streamPill').className = 'stream-pill live';
+    document.getElementById('streamBlink').style.display = '';
+    document.getElementById('streamStatus').textContent = 'live';
+    toast('SSE подключён ✓', 'ok');
+  };
+
+  eventSource.onmessage = (e) => {
+    try {
+      const cmd = JSON.parse(e.data);
+      addCommand(cmd);
+    } catch { }
+  };
+
+  eventSource.onerror = () => {
+    stopStream();
+    toast('SSE соединение потеряно', 'err');
+  };
+}
+
+function stopStream() {
+  if (eventSource) { eventSource.close(); eventSource = null; }
+  streamActive = false;
+  document.getElementById('streamToggleBtn').textContent = '▶ Подключиться';
+  document.getElementById('streamPill').className = 'stream-pill';
+  document.getElementById('streamBlink').style.display = 'none';
+  document.getElementById('streamStatus').textContent = '● offline';
+}
+
+async function clearCommands() {
+  try {
+    await apiFetch('/dev/commands/history', { method: 'DELETE' });
+    commands = [];
+    renderCommands();
+    toast('Буфер команд очищен', 'ok');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+// ── Export commands log ────────────────────────────────────────────────────
+function exportCommands() {
+  const activeTopics = Array.from(
+    document.querySelectorAll('.topic-filter:checked')
+  ).map(cb => cb.value);
+
+  const activeDirs = Array.from(
+    document.querySelectorAll('.dir-filter:checked')
+  ).map(cb => cb.value);
+
+  const filtered = commands.filter(c => {
+    const dir = c.direction || 'in';
+    if (!activeDirs.includes(dir)) return false;
+    return activeTopics.some(t => c.topic.includes(t));
+  });
+
+  if (!filtered.length) {
+    toast('Нет сообщений для экспорта', 'err');
+    return;
+  }
+
+  const lines = filtered.slice().reverse().map(c => {
+    const dir = c.direction || 'in';
+    const dirLabel = dir === 'out' ? '→ HA→Сбер' : '← Сбер→HA';
+    const dt = new Date(c.ts * 1000).toLocaleString('ru-RU', {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    });
+    return [
+      `[${dt}] [${dirLabel}] ${c.topic}`,
+      JSON.stringify(c.payload, null, 2),
+      '\u2500'.repeat(60),
+    ].join('\n');
+  });
+
+  const ts     = new Date();
+  const header = [
+    'Sber MQTT \u2014 \u041b\u043e\u0433 MQTT',
+    '\u042d\u043a\u0441\u043f\u043e\u0440\u0442: ' + ts.toLocaleString('ru-RU'),
+    '\u0417\u0430\u043f\u0438\u0441\u0435\u0439: ' + filtered.length,
+    '\u2550'.repeat(60),
+    '',
+  ].join('\n');
+
+  const text = header + lines.join('\n\n');
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  const fname = 'sber_mqtt_log_' + ts.toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+  a.href     = url;
+  a.download = fname;
+  a.click();
+  URL.revokeObjectURL(url);
+  toast('\u042d\u043a\u0441\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043e ' + filtered.length + ' \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u2713', 'ok');
+}
+
+// ── Utils ──────────────────────────────────────────────────────────────────
+function escH(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+async function init() {
+  await loadStatus();
+  await loadConfig();
+  setInterval(loadStatus, 30000);
+}
+
+// ── HA Theme Sync ─────────────────────────────────────────────────────────
+// Читаем CSS-переменные из родительского окна HA (тот же домен).
+// HA хранит активную тему как атрибуты/переменные на <html> родителя.
+// Определяем тёмный/светлый режим по яркости --primary-background-color.
+
+function syncHATheme() {
+  try {
+    const parentStyles = window.parent.getComputedStyle(window.parent.document.documentElement);
+
+    // Читаем фоновый цвет HA — по нему определяем тёмный/светлый режим
+    const bgColor = parentStyles.getPropertyValue('--primary-background-color').trim()
+                 || parentStyles.getPropertyValue('--lovelace-background').trim();
+
+    // Парсим RGB и считаем яркость
+    const isDark = (() => {
+      const tmp = document.createElement('div');
+      tmp.style.color = bgColor || '#0d1117';
+      document.body.appendChild(tmp);
+      const rgb = window.getComputedStyle(tmp).color;
+      document.body.removeChild(tmp);
+      const m = rgb.match(/\d+/g);
+      if (!m) return true;
+      const [r, g, b] = m.map(Number);
+      // Relative luminance
+      return (0.299 * r + 0.587 * g + 0.114 * b) < 128;
+    })();
+
+    document.documentElement.classList.toggle('ha-light', !isDark);
+
+    // Дополнительно подтягиваем акцентный цвет HA (primary-color)
+    const haAccent = parentStyles.getPropertyValue('--primary-color').trim();
+    if (haAccent) {
+      document.documentElement.style.setProperty('--accent', haAccent);
+    }
+  } catch (e) {
+    // Если нет доступа к родителю (открыт не в iframe) — оставляем тёмную тему
+  }
+}
+
+// Следим за сменой темы в родительском окне через MutationObserver
+function watchHATheme() {
+  try {
+    const observer = new MutationObserver(syncHATheme);
+    observer.observe(window.parent.document.documentElement, {
+      attributes: true,
+      attributeFilter: ['style', 'class'],
+    });
+  } catch (e) { }
+}
+
+window.addEventListener('load', init);
+syncHATheme();
+watchHATheme();
+</script>
+</body>
+</html>

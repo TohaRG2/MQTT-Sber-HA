@@ -13,6 +13,7 @@ import asyncio
 import json
 import logging
 import ssl
+import time as _time
 from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
@@ -77,12 +78,36 @@ class SberMQTTClient:
         self._client: mqtt.Client | None = None
         self._connected = False
 
+        # Последняя ошибка подключения — хранится для DevTools
+        self._last_error: str | None = None
+        self._last_error_time: float | None = None
+        self._last_connected_time: float | None = None
+
     # ── Публичный интерфейс ────────────────────────────────────────────────
 
     @property
     def is_connected(self) -> bool:
         """Возвращает True если соединение с брокером установлено."""
         return self._connected
+
+    @property
+    def connection_info(self) -> dict:
+        """Возвращает расширенную информацию о состоянии соединения для DevTools."""
+        import time as _time
+        return {
+            "connected":           self._connected,
+            "broker":              self._broker,
+            "port":                self._port,
+            "login":               self._login,
+            "last_error":          self._last_error,
+            "last_error_time":     self._last_error_time,
+            "last_connected_time": self._last_connected_time,
+        }
+
+    def reconnect(self) -> bool:
+        """Переподключается к брокеру. Блокирующий — вызывать через executor."""
+        self.disconnect()
+        return self.connect()
 
     def connect(self) -> bool:
         """Подключается к брокеру Сбера. Блокирующий метод — вызывать через executor."""
@@ -141,10 +166,14 @@ class SberMQTTClient:
                 return False
             else:
                 _LOGGER.error("Sber MQTT: таймаут ожидания подключения (10с)")
+                self._last_error = "Таймаут ожидания подключения (10 с). Проверьте адрес брокера и порт."
+                self._last_error_time = _time.time()
                 return False
 
         except Exception as exc:
             _LOGGER.error("Sber MQTT: ошибка подключения: %s", exc)
+            self._last_error = str(exc)
+            self._last_error_time = _time.time()
             return False
 
     def disconnect(self) -> None:
@@ -194,6 +223,8 @@ class SberMQTTClient:
         """Вызывается при установке соединения с брокером."""
         if rc == 0:
             self._connected = True
+            self._last_error = None
+            self._last_connected_time = _time.time()
             sub_topic = f"sberdevices/v1/{self._login}/down/#"
             client.subscribe(sub_topic, qos=0)
             _LOGGER.info(
@@ -209,14 +240,20 @@ class SberMQTTClient:
                 4: "неверный логин или пароль",
                 5: "не авторизован",
             }
+            reason = codes.get(rc, "неизвестная ошибка")
+            self._last_error = f"Брокер отклонил подключение: rc={rc} — {reason}"
+            self._last_error_time = _time.time()
             _LOGGER.error(
                 "Sber MQTT: соединение отклонено rc=%s (%s)",
-                rc, codes.get(rc, "неизвестная ошибка"),
+                rc, reason,
             )
 
     def _on_disconnect(self, client, userdata, rc) -> None:
         """Вызывается при разрыве соединения. Paho автоматически переподключается."""
         self._connected = False
+        if rc != 0:
+            self._last_error = f"Соединение разорвано неожиданно (rc={rc}). Paho переподключится автоматически."
+            self._last_error_time = _time.time()
         _LOGGER.warning(
             "Sber MQTT: соединение разорвано rc=%s (%s)",
             rc, "штатное отключение" if rc == 0 else "неожиданный разрыв — paho переподключится",

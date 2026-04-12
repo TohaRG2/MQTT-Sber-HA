@@ -40,6 +40,7 @@ from .api_devtools import (
     SberDevPanelView,
     SberDevToolsExistsView,
     SberConnectionStatusView,
+    SberDevReconnectView,
 )
 
 __all__ = [
@@ -56,4 +57,5 @@ __all__ = [
     "SberDevConfigRawView", "SberDevStateView", "SberDevStateRawView",
     "SberDevCommandsHistoryView", "SberDevCommandsStreamView",
     "SberDevPanelView", "SberDevToolsExistsView", "SberConnectionStatusView",
+    "SberDevReconnectView",
 ]
