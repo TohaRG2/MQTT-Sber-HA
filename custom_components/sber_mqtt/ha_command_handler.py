@@ -18,7 +18,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant
 
-from .ha_helpers import _parse_bool
+from .ha_helpers import _parse_bool, _parse_integer
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -36,6 +36,7 @@ class HACommandHandler:
         [{"key": "on_off", "value": {"type": "BOOL", "bool_value": true}}]
         """
         device_type = device.get("device_type")
+        device_id = device.get("id")
 
         # ── Управляемые устройства ───────────────────────────────────────
         if device_type == "relay":
@@ -70,6 +71,17 @@ class HACommandHandler:
                 "Команда для устройства неизвестного типа '%s': %s",
                 device_type, device.get("id"),
             )
+
+    def _track_ha_command(self, device: dict, states: list, domain: str, service: str, data: dict) -> None:
+        """Записать команду HA в буфер отслеживания DevTools."""
+        try:
+            from .api_devtools import devtools_track_ha_command
+            device_id = device.get("id")
+            sber_cmd = {"device_id": device_id, "device_type": device.get("device_type"), "states": states}
+            ha_call = {"domain": domain, "service": service, "data": data}
+            devtools_track_ha_command(device_id, sber_cmd, ha_call)
+        except Exception:
+            pass
 
     async def _handle_relay_command(self, device: dict, states: list) -> None:
         """Обрабатывает команду включения/выключения реле."""
@@ -110,12 +122,14 @@ class HACommandHandler:
         if domain == "script":
             # Сценарий запускается независимо от значения on_off
             script_name = entity_id.split(".", 1)[1]  # "script.my_scene" → "my_scene"
+            self._track_ha_command(device, states, "script", script_name, {})
             await self._hass.services.async_call(
                 "script", script_name, {}, blocking=False
             )
 
         elif domain in ("button", "input_button"):
             # Кнопки нажимаются независимо от значения on_off
+            self._track_ha_command(device, states, domain, "press", {"entity_id": entity_id})
             await self._hass.services.async_call(
                 domain, "press", {"entity_id": entity_id}, blocking=False
             )
@@ -123,6 +137,7 @@ class HACommandHandler:
         elif domain in ("switch", "input_boolean", "light"):
             # Переключаемые сущности: turn_on или turn_off
             service = "turn_on" if on_off_value else "turn_off"
+            self._track_ha_command(device, states, "homeassistant", service, {"entity_id": entity_id})
             await self._hass.services.async_call(
                 "homeassistant", service, {"entity_id": entity_id}, blocking=False
             )
@@ -130,6 +145,7 @@ class HACommandHandler:
         elif domain == "media_player":
             # Медиаплеер: turn_on / turn_off через домен media_player
             service = "turn_on" if on_off_value else "turn_off"
+            self._track_ha_command(device, states, "media_player", service, {"entity_id": entity_id})
             await self._hass.services.async_call(
                 "media_player", service, {"entity_id": entity_id}, blocking=False
             )
@@ -169,29 +185,33 @@ class HACommandHandler:
                 is_on = _parse_bool(val_obj)
                 service = "turn_on" if is_on else "turn_off"
                 _LOGGER.info("HVAC %s: on_off=%s → climate.%s", device.get("id"), is_on, service)
+                self._track_ha_command(device, states, "climate", service, {"entity_id": entity_id})
                 await self._hass.services.async_call(
                     "climate", service, {"entity_id": entity_id}, blocking=False
                 )
 
             elif key == "hvac_temp_set":
-                temp = val_obj.get("integer_value")
-                if temp is not None:
-                    try:
-                        temp_f = float(temp)
-                        _LOGGER.info("HVAC %s: set_temperature=%.1f", device.get("id"), temp_f)
-                        await self._hass.services.async_call(
-                            "climate", "set_temperature",
-                            {"entity_id": entity_id, "temperature": temp_f},
-                            blocking=False,
-                        )
-                    except (ValueError, TypeError):
-                        _LOGGER.warning("HVAC %s: невалидная температура: %s", device.get("id"), temp)
+                temp = _parse_integer(val_obj)
+                try:
+                    temp_f = float(temp)
+                    _LOGGER.info("HVAC %s: set_temperature=%.1f", device.get("id"), temp_f)
+                    self._track_ha_command(device, states, "climate", "set_temperature",
+                                           {"entity_id": entity_id, "temperature": temp_f})
+                    await self._hass.services.async_call(
+                        "climate", "set_temperature",
+                        {"entity_id": entity_id, "temperature": temp_f},
+                        blocking=False,
+                    )
+                except (ValueError, TypeError):
+                    _LOGGER.warning("HVAC %s: невалидная температура: %s", device.get("id"), temp)
 
             elif key == "hvac_work_mode":
                 sber_mode = val_obj.get("enum_value", "")
                 ha_mode   = SBER_HVAC_MODE_TO_HA.get(sber_mode)
                 if ha_mode:
                     _LOGGER.info("HVAC %s: set_hvac_mode=%s (sber=%s)", device.get("id"), ha_mode, sber_mode)
+                    self._track_ha_command(device, states, "climate", "set_hvac_mode",
+                                           {"entity_id": entity_id, "hvac_mode": ha_mode})
                     await self._hass.services.async_call(
                         "climate", "set_hvac_mode",
                         {"entity_id": entity_id, "hvac_mode": ha_mode},
@@ -217,6 +237,8 @@ class HACommandHandler:
                         "HVAC %s: hvac_air_flow_power=%s → set_preset_mode(%s)",
                         device.get("id"), sber_flow, preset_mode,
                     )
+                    self._track_ha_command(device, states, "climate", "set_preset_mode",
+                                           {"entity_id": entity_id, "preset_mode": preset_mode})
                     await self._hass.services.async_call(
                         "climate", "set_preset_mode",
                         {"entity_id": entity_id, "preset_mode": preset_mode},
@@ -228,12 +250,16 @@ class HACommandHandler:
                         "HVAC %s: hvac_air_flow_power=%s → set_fan_mode(%s)",
                         device.get("id"), sber_flow, fan_mode,
                     )
+                    self._track_ha_command(device, states, "climate", "set_fan_mode",
+                                           {"entity_id": entity_id, "fan_mode": fan_mode})
                     await self._hass.services.async_call(
                         "climate", "set_fan_mode",
                         {"entity_id": entity_id, "fan_mode": fan_mode},
                         blocking=False,
                     )
                     # Сбрасываем preset в none чтобы не осталось boost/sleep
+                    self._track_ha_command(device, states, "climate", "set_preset_mode",
+                                           {"entity_id": entity_id, "preset_mode": "none"})
                     await self._hass.services.async_call(
                         "climate", "set_preset_mode",
                         {"entity_id": entity_id, "preset_mode": "none"},
@@ -249,6 +275,8 @@ class HACommandHandler:
                         "HVAC %s: hvac_air_flow_direction=%s → set_swing_mode(%s)",
                         device.get("id"), sber_dir, ha_swing,
                     )
+                    self._track_ha_command(device, states, "climate", "set_swing_mode",
+                                           {"entity_id": entity_id, "swing_mode": ha_swing})
                     await self._hass.services.async_call(
                         "climate", "set_swing_mode",
                         {"entity_id": entity_id, "swing_mode": ha_swing},
@@ -290,6 +318,7 @@ class HACommandHandler:
                     "Пылесос %s: команда '%s' → %s.%s",
                     device.get("id"), sber_cmd, domain, service,
                 )
+                self._track_ha_command(device, states, domain, service, {"entity_id": entity_id})
                 await self._hass.services.async_call(
                     domain, service, {"entity_id": entity_id}, blocking=False
                 )
@@ -334,6 +363,7 @@ class HACommandHandler:
                     "Кран %s: команда '%s' → %s.%s",
                     device.get("id"), sber_cmd, d, service,
                 )
+                self._track_ha_command(device, states, d, service, {"entity_id": entity_id})
                 await self._hass.services.async_call(
                     d, service, {"entity_id": entity_id}, blocking=False
                 )
@@ -383,7 +413,7 @@ class HACommandHandler:
                 # Сбер 50–1000 → HA 0–255
                 try:
                     from .const import LIGHT_BRIGHTNESS_MIN, LIGHT_BRIGHTNESS_MAX
-                    sber_b = int(val.get("integer_value", 500))
+                    sber_b = _parse_integer(val, LIGHT_BRIGHTNESS_MIN)
                     ha_brightness = round(
                         (sber_b - LIGHT_BRIGHTNESS_MIN)
                         / (LIGHT_BRIGHTNESS_MAX - LIGHT_BRIGHTNESS_MIN)
@@ -415,8 +445,12 @@ class HACommandHandler:
                 # Сбер 0–1000: 0 = тёплый (max_mireds), 1000 = холодный (min_mireds) — инвертировано.
                 # Цвет и температура взаимоисключающие — убираем цвет если был.
                 # Используем color_temp_kelvin если лампа его поддерживает, иначе color_temp (мирады).
+                #
+                # ВАЖНО: интерполяция всегда ведётся в мирадах, потому что HA→Sber
+                # тоже интерполирует в мирадах (sber_serializer.py:908).
+                # Если интерполировать в Кельвинах, обратное преобразование «прыгает».
                 try:
-                    sber_ct = int(val.get("integer_value", 500))
+                    sber_ct = _parse_integer(val, 0)
                     hass_state = self._hass.states.get(entity_id)
                     a = hass_state.attributes if hass_state else {}
 
@@ -428,13 +462,18 @@ class HACommandHandler:
                     max_k = a.get("max_color_temp_kelvin")
 
                     if min_k is not None and max_k is not None:
-                        mn_k = float(min_k)  # тёплый
-                        mx_k = float(max_k)  # холодный
-                        kelvin = round(mn_k + (sber_ct / 1000.0) * (mx_k - mn_k))
-                        kelvin = max(int(mn_k), min(int(mx_k), kelvin))
+                        # Переводим границы Кельвинов в мирады
+                        mn = 1_000_000 / float(max_k)  # холодный → меньше мирад
+                        mx = 1_000_000 / float(min_k)  # тёплый → больше мирад
+                        # Линейная интерполяция в мирадах: 0→mx (тёплый), 1000→mn (холодный)
+                        mireds = round(mx - (sber_ct / 1000.0) * (mx - mn))
+                        mireds = max(int(mn), min(int(mx), mireds))
+                        # Обратное преобразование в Кельвины для HA
+                        kelvin = round(1_000_000 / mireds) if mireds > 0 else int(min_k)
+                        kelvin = max(int(min_k), min(int(max_k), kelvin))
                         _LOGGER.info(
-                            "Лампа %s: light.turn_on color_temp_kelvin=%d (sber=%d)",
-                            device.get("id"), kelvin, sber_ct,
+                            "Лампа %s: light.turn_on color_temp_kelvin=%d (sber=%d, mireds=%d)",
+                            device.get("id"), kelvin, sber_ct, mireds,
                         )
                         service_data["color_temp_kelvin"] = kelvin
                     else:
@@ -490,6 +529,7 @@ class HACommandHandler:
             "Лампа %s: %s.%s %s",
             device.get("id"), "light", service, service_data,
         )
+        self._track_ha_command(device, states, "light", service, service_data)
         await self._hass.services.async_call(
             "light", service, service_data, blocking=False
         )
@@ -526,6 +566,7 @@ class HACommandHandler:
                         "Шторы %s: команда '%s' → %s.%s",
                         device.get("id"), sber_cmd, domain, service,
                     )
+                    self._track_ha_command(device, states, domain, service, {"entity_id": entity_id})
                     await self._hass.services.async_call(
                         domain, service, {"entity_id": entity_id}, blocking=False
                     )
@@ -534,12 +575,14 @@ class HACommandHandler:
 
             elif key == "open_percentage":
                 try:
-                    pct = int(val.get("integer_value", 0))
+                    pct = _parse_integer(val, 0)
                     pct = max(0, min(100, pct))
                     _LOGGER.info(
                         "Шторы %s: open_percentage=%s → cover.set_cover_position",
                         device.get("id"), pct,
                     )
+                    self._track_ha_command(device, states, "cover", "set_cover_position",
+                                           {"entity_id": entity_id, "position": pct})
                     await self._hass.services.async_call(
                         "cover", "set_cover_position",
                         {"entity_id": entity_id, "position": pct},
@@ -573,29 +616,33 @@ class HACommandHandler:
                 is_on = _parse_bool(val_obj)
                 service = "turn_on" if is_on else "turn_off"
                 _LOGGER.info("Humidifier %s: on_off=%s → humidifier.%s", device.get("id"), is_on, service)
+                self._track_ha_command(device, states, "humidifier", service, {"entity_id": entity_id})
                 await self._hass.services.async_call(
                     "humidifier", service, {"entity_id": entity_id}, blocking=False
                 )
 
             elif key == "hvac_humidity_set":
-                humidity = val_obj.get("integer_value")
-                if humidity is not None:
-                    try:
-                        h = max(0, min(100, int(float(humidity))))
-                        _LOGGER.info("Humidifier %s: set_humidity=%d", device.get("id"), h)
-                        await self._hass.services.async_call(
-                            "humidifier", "set_humidity",
-                            {"entity_id": entity_id, "humidity": h},
-                            blocking=False,
-                        )
-                    except (ValueError, TypeError):
-                        _LOGGER.warning("Humidifier %s: невалидная влажность: %s", device.get("id"), humidity)
+                humidity = _parse_integer(val_obj)
+                try:
+                    h = max(0, min(100, int(float(humidity))))
+                    _LOGGER.info("Humidifier %s: set_humidity=%d", device.get("id"), h)
+                    self._track_ha_command(device, states, "humidifier", "set_humidity",
+                                           {"entity_id": entity_id, "humidity": h})
+                    await self._hass.services.async_call(
+                        "humidifier", "set_humidity",
+                        {"entity_id": entity_id, "humidity": h},
+                        blocking=False,
+                    )
+                except (ValueError, TypeError):
+                    _LOGGER.warning("Humidifier %s: невалидная влажность: %s", device.get("id"), humidity)
 
             elif key == "hvac_air_flow_power":
                 sber_mode = val_obj.get("enum_value", "")
                 ha_mode   = SBER_AIR_FLOW_TO_HA_MODE.get(sber_mode)
                 if ha_mode:
                     _LOGGER.info("Humidifier %s: set_mode=%s (sber=%s)", device.get("id"), ha_mode, sber_mode)
+                    self._track_ha_command(device, states, "humidifier", "set_mode",
+                                           {"entity_id": entity_id, "mode": ha_mode})
                     await self._hass.services.async_call(
                         "humidifier", "set_mode",
                         {"entity_id": entity_id, "mode": ha_mode},
@@ -636,9 +683,7 @@ class HACommandHandler:
             for state in states:
                 if state.get("key") != "kitchen_water_temperature_set":
                     continue
-                temp = state.get("value", {}).get("integer_value")
-                if temp is None:
-                    continue
+                temp = _parse_integer(state.get("value", {}))
                 try:
                     temp_f = float(temp)
                 except (ValueError, TypeError):
@@ -649,34 +694,42 @@ class HACommandHandler:
                     "Kettle %s: set_temperature=%.0f, operation_mode=electric → water_heater.set_temperature",
                     device.get("id"), temp_f,
                 )
+                self._track_ha_command(device, states, "water_heater", "set_operation_mode",
+                                       {"entity_id": entity_id, "operation_mode": "electric"})
                 await self._hass.services.async_call(
                     domain = "water_heater",
                     service = "set_operation_mode",
                     service_data = {"entity_id": entity_id, "operation_mode": "electric"},
                     blocking=True
                 )
+                self._track_ha_command(device, states, "water_heater", "set_temperature",
+                                       {"entity_id": entity_id, "temperature": temp_f, "operation_mode": "electric"})
                 await self._hass.services.async_call(
                     domain = "water_heater",
                     service = "set_temperature",
                     service_data = {"entity_id": entity_id, "temperature": temp_f, "operation_mode": "electric"}
                 )
-            return
+                return
 
-        # ── Ветка 2: только on_off ────────────────────────────────────────
-        if has_on_off:
-            for state in states:
-                if state.get("key") != "on_off":
-                    continue
-                is_on = _parse_bool(state.get("value", {}))
-                if is_on:
-                    _LOGGER.info("Kettle %s: on_off=True → water_heater.turn_on", device.get("id"))
-                    await self._hass.services.async_call(
-                        "water_heater", "turn_on", {"entity_id": entity_id}, blocking=False,
-                    )
-                else:
-                    _LOGGER.info("Kettle %s: on_off=False → water_heater.set_operation_mode(off)", device.get("id"))
-                    await self._hass.services.async_call(
-                        "water_heater", "set_operation_mode",
-                        {"entity_id": entity_id, "operation_mode": "off"},
-                        blocking=False,
-                    )
+            # ── Ветка 2: только on_off ────────────────────────────────────────
+            if has_on_off:
+                for state in states:
+                    if state.get("key") != "on_off":
+                        continue
+                    is_on = _parse_bool(state.get("value", {}))
+                    if is_on:
+                        _LOGGER.info("Kettle %s: on_off=True → water_heater.turn_on", device.get("id"))
+                        self._track_ha_command(device, states, "water_heater", "turn_on",
+                                               {"entity_id": entity_id})
+                        await self._hass.services.async_call(
+                            "water_heater", "turn_on", {"entity_id": entity_id}, blocking=False,
+                        )
+                    else:
+                        _LOGGER.info("Kettle %s: on_off=False → water_heater.set_operation_mode(off)", device.get("id"))
+                        self._track_ha_command(device, states, "water_heater", "set_operation_mode",
+                                               {"entity_id": entity_id, "operation_mode": "off"})
+                        await self._hass.services.async_call(
+                            "water_heater", "set_operation_mode",
+                            {"entity_id": entity_id, "operation_mode": "off"},
+                            blocking=False,
+                        )

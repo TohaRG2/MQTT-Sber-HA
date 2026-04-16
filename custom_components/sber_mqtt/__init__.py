@@ -198,6 +198,14 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberDevToolsExistsView,
         SberDevReconnectView,
     )
+    from .api_devtools import (
+        # Device Tracking
+        SberDevTrackingStartView,
+        SberDevTrackingStopView,
+        SberDevTrackingInfoView,
+        SberDevTrackingClearView,
+        SberDevTrackingStreamView,
+    )
     hass.http.register_view(SberDevicesView(hass))
     hass.http.register_view(SberDeviceView(hass))
     hass.http.register_view(SberHAEntitiesRelayView(hass))
@@ -227,6 +235,12 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberDevPanelView(hass))
     hass.http.register_view(SberDevToolsExistsView(hass))
     hass.http.register_view(SberDevReconnectView(hass))
+    # Device Tracking
+    hass.http.register_view(SberDevTrackingStartView(hass))
+    hass.http.register_view(SberDevTrackingStopView(hass))
+    hass.http.register_view(SberDevTrackingInfoView(hass))
+    hass.http.register_view(SberDevTrackingClearView(hass))
+    hass.http.register_view(SberDevTrackingStreamView(hass))
 
 
 # ------------------------------------------------------------------ #

@@ -270,3 +270,31 @@ def _parse_bool(val_obj: dict) -> bool:
     if isinstance(raw, int):
         return bool(raw)
     return False
+
+
+def _parse_integer(val_obj: dict, default: int = 0) -> int:
+    """Парсит integer_value из объекта значения Сбера.
+
+    Сбер может прислать integer_value как:
+      - int: числовое значение
+      - str: строку с числом (например "215")
+      - None: отсутствует — трактуется как default (по умолчанию 0)
+
+    Если тип значения INTEGER, но само значение отсутствует,
+    считается что значение равно минимально возможному (0).
+
+    Используется в ha_command_handler для разбора INTEGER команд.
+    """
+    raw = val_obj.get("integer_value")
+    if raw is None:
+        return default
+    if isinstance(raw, int):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return int(raw)
+        except ValueError:
+            return default
+    if isinstance(raw, float):
+        return int(raw)
+    return default
