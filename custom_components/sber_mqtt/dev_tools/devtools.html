@@ -183,6 +183,12 @@ label.fg-label{display:block;font-size:11px;font-weight:600;color:var(--muted);m
       Команды ←Сбер
       <span class="badge badge-count" id="cmdCountBadge">0</span>
     </button>
+    <div class="nav-sep"></div>
+    <div class="nav-section">Отслеживание</div>
+    <button class="nav-item" data-panel="tracking" onclick="switchPanel('tracking')">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/></svg>
+      Отследить устройство
+    </button>
   </div>
 
   <!-- Content -->
@@ -441,6 +447,97 @@ label.fg-label{display:block;font-size:11px;font-weight:600;color:var(--muted);m
       </div>
     </div>
 
+    <!-- ══ PANEL: Device Tracking ══ -->
+    <div class="panel" id="panel-tracking">
+      <div class="panel-header">
+        <div>
+          <div class="panel-title">Отследить устройство</div>
+          <div class="panel-desc">Выберите устройство и соберите логи по нему: команды Сбера, отправка в HA, изменения состояний</div>
+        </div>
+        <div class="btn-group">
+          <div class="stream-pill" id="trackingStreamPill" style="display:none">
+            <span class="blink" style="display:none" id="trackingStreamBlink"></span>
+            <span id="trackingStreamStatus">● offline</span>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="clearTrackingBuffer()">🗑 Очистить</button>
+        </div>
+      </div>
+
+      <!-- Device selector -->
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">Выбрать устройство</div>
+        </div>
+        <div class="card-body" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <select class="device-select" id="trackingDeviceSelect" style="max-width:350px" onchange="onTrackingDeviceChange()">
+            <option value="">— Выберите устройство —</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="trackingStartBtn" onclick="startTracking()" disabled>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+            Начать отслеживание
+          </button>
+          <button class="btn btn-danger btn-sm" id="trackingStopBtn" onclick="stopTracking()" style="display:none">
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+            Остановить
+          </button>
+          <span class="badge badge-count" id="trackingCountBadge">0 записей</span>
+        </div>
+      </div>
+
+      <!-- Tracking log -->
+      <div class="card">
+        <div class="card-hdr">
+          <div class="card-title">Лог событий устройства</div>
+          <div style="display:flex;align-items:center;gap:8px">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" id="trackingAutoScroll" checked> Автопрокрутка
+            </label>
+            <button class="btn btn-ghost btn-sm" onclick="exportTrackingLog()" title="Экспорт лога">
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zm-14 9v2h14v-2H5z"/></svg>
+              Экспорт
+            </button>
+          </div>
+        </div>
+        <div class="card-body" style="padding:0">
+          <!-- Event type filters -->
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--border);align-items:center">
+            <span style="font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.4px;color:var(--muted2);min-width:50px">Тип</span>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="sber_command" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-in">↓</span> Команда Сбера
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="sber_status_request" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-in">↓</span> Запрос статуса
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="ha_command" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-out">→</span> Команда в HA
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="ha_status_update" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-out">↑</span> Отправка статуса HA
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="ha_config_update" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-out">↑</span> Отправка конфига HA
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="sber_error" checked onchange="renderTrackingLog()">
+              <span class="cmd-dir cmd-dir-in">!</span> Ошибка Сбера
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" class="tracking-type-filter" value="other" checked onchange="renderTrackingLog()">
+              Прочее
+            </label>
+          </div>
+        </div>
+        <div class="cmd-log" id="trackingLog" style="height:420px">
+          <div class="cmd-empty">Выберите устройство и нажмите «Начать отслеживание»</div>
+        </div>
+      </div>
+    </div>
+
   </div><!-- /content -->
 </div><!-- /layout -->
 
@@ -459,6 +556,7 @@ function switchPanel(name) {
   if (name === 'commands' && !streamActive) loadCommandsHistory();
   if (name === 'state') loadStateDevices();
   if (name === 'connection') loadConnectionInfo();
+  if (name === 'tracking') loadTrackingDevices();
 }
 
 // ── API helpers ────────────────────────────────────────────────────────────
@@ -940,6 +1038,276 @@ function exportCommands() {
   a.click();
   URL.revokeObjectURL(url);
   toast('\u042d\u043a\u0441\u043f\u043e\u0440\u0442\u0438\u0440\u043e\u0432\u0430\u043d\u043e ' + filtered.length + ' \u0437\u0430\u043f\u0438\u0441\u0435\u0439 \u2713', 'ok');
+}
+
+// ══ DEVICE TRACKING ═══════════════════════════════════════════════════════════
+
+let trackingDevices = [];
+let trackingLog = [];
+let trackingActive = false;
+let trackingDeviceId = '';
+let trackingStreamActive = false;
+let trackingEventSource = null;
+
+async function loadTrackingDevices() {
+  try {
+    const d = await apiFetch('/devices');
+    trackingDevices = d.devices || [];
+    const sel = document.getElementById('trackingDeviceSelect');
+    sel.innerHTML = '<option value="">— Выберите устройство —</option>';
+    trackingDevices.forEach(dev => {
+      const o = document.createElement('option');
+      o.value = dev.id;
+      o.textContent = `${dev.name} (${dev.id}) — ${dev.device_type}`;
+      sel.appendChild(o);
+    });
+    const info = await apiFetch('/dev/tracking/info');
+    if (info.active && info.device_id) {
+      trackingActive = true;
+      trackingDeviceId = info.device_id;
+      trackingLog = info.buffer || [];
+      sel.value = trackingDeviceId;
+      updateTrackingUI();
+      renderTrackingLog();
+    }
+  } catch (e) {
+    toast('Не удалось загрузить устройства: ' + e.message, 'err');
+  }
+}
+
+function onTrackingDeviceChange() {
+  const sel = document.getElementById('trackingDeviceSelect');
+  document.getElementById('trackingStartBtn').disabled = !sel.value;
+}
+
+async function startTracking() {
+  const sel = document.getElementById('trackingDeviceSelect');
+  const deviceId = sel.value;
+  if (!deviceId) { toast('Выберите устройство', 'err'); return; }
+  try {
+    await apiFetch('/dev/tracking/start', { method: 'POST', body: JSON.stringify({ device_id: deviceId }) });
+    trackingActive = true;
+    trackingDeviceId = deviceId;
+    trackingLog = [];
+    updateTrackingUI();
+    renderTrackingLog();
+    toast('Отслеживание ' + deviceId + ' запущено', 'ok');
+    // Автоматически подключаем SSE стрим
+    startTrackingStream();
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+async function stopTracking() {
+  try {
+    await apiFetch('/dev/tracking/stop', { method: 'POST' });
+    trackingActive = false;
+    trackingDeviceId = '';
+    // Автоматически отключаем SSE стрим
+    stopTrackingStream();
+    updateTrackingUI();
+    toast('Отслеживание остановлено', 'ok');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+function updateTrackingUI() {
+  const startBtn = document.getElementById('trackingStartBtn');
+  const stopBtn = document.getElementById('trackingStopBtn');
+  const sel = document.getElementById('trackingDeviceSelect');
+  const countBadge = document.getElementById('trackingCountBadge');
+  if (trackingActive) {
+    startBtn.style.display = 'none';
+    stopBtn.style.display = '';
+    sel.disabled = true;
+    countBadge.textContent = trackingLog.length + ' записей';
+  } else {
+    startBtn.style.display = '';
+    stopBtn.style.display = 'none';
+    sel.disabled = false;
+    countBadge.textContent = '0 записей';
+  }
+}
+
+function getEnabledTrackingTypes() {
+  const checked = [];
+  document.querySelectorAll('.tracking-type-filter:checked').forEach(el => checked.push(el.value));
+  return checked;
+}
+
+function renderTrackingLog() {
+  const log = document.getElementById('trackingLog');
+  const enabledTypes = getEnabledTrackingTypes();
+  const filtered = trackingLog.filter(c => {
+    const eventType = c.event_type || 'other';
+    return enabledTypes.includes(eventType);
+  });
+  document.getElementById('trackingCountBadge').textContent = trackingLog.length + ' записей';
+  if (!filtered.length) {
+    log.innerHTML = '<div class="cmd-empty">Нет сообщений по выбранным фильтрам.</div>';
+    return;
+  }
+  log.innerHTML = filtered.slice().reverse().map((c, i) => {
+    const eventType = c.event_type || 'other';
+    const dir = c.direction || 'in';
+    const isOut = dir === 'out';
+    const topicParts = c.topic.split('/');
+    const topicShort = topicParts.slice(-2).join('/');
+    let eventBadge = '';
+    let preview = '';
+    let detailHTML = '';
+    switch (eventType) {
+      case 'sber_command':
+        eventBadge = '<span class="cmd-dir cmd-dir-in">↓ Сбер</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+        break;
+      case 'sber_status_request':
+        eventBadge = '<span class="cmd-dir cmd-dir-in">? Запрос</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+        break;
+      case 'ha_command':
+        eventBadge = '<span class="cmd-dir cmd-dir-out">→ HA</span>';
+        const sberCmd = c.payload?.sber_command || {};
+        const haCall = c.payload?.ha_service_call || {};
+        const sberStates = sberCmd.states || [];
+        const sberPreview = sberStates.map(s => `${s.key}=${JSON.stringify(s.value)}`).join(', ') || '—';
+        preview = `${haCall.domain}.${haCall.service}(${JSON.stringify(haCall.data)})`;
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <div style="margin-bottom:8px">
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">← Команда от Сбера:</div>
+            <div style="font-size:11px;color:var(--text);padding:6px 8px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--cmd-in)">
+              ${sberStates.map(s => `<div><code>${escH(s.key)}</code> = ${escH(JSON.stringify(s.value))}</div>`).join('') || '—'}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:4px">→ Вызов сервиса HA:</div>
+            <div style="font-size:11px;color:var(--text);padding:6px 8px;background:var(--bg2);border-radius:4px;border-left:3px solid var(--cmd-out)">
+              <code style="color:var(--accent)">${escH(haCall.domain || '—')}.${escH(haCall.service || '—')}</code>
+              <pre style="margin:4px 0 0 0;font-size:10px">${escH(JSON.stringify(haCall.data || {}, null, 2))}</pre>
+            </div>
+          </div>`;
+        break;
+      case 'ha_status_update':
+        eventBadge = '<span class="cmd-dir cmd-dir-out">↑ Статус</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+        break;
+      case 'ha_config_update':
+        eventBadge = '<span class="cmd-dir cmd-dir-out">↑ Конфиг</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+        break;
+      case 'sber_error':
+        eventBadge = '<span class="cmd-dir cmd-dir-in">! Ошибка</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+        break;
+      default:
+        eventBadge = '<span class="cmd-dir">· Прочее</span>';
+        preview = JSON.stringify(c.payload).slice(0, 120);
+        detailHTML = `<div style="font-size:10px;color:var(--muted);margin-bottom:4px">📍 ${escH(c.topic)}</div>
+          <div style="font-size:10px;color:var(--accent);margin-bottom:6px">Тип: <b>${eventType}</b></div>
+          <pre>${escH(JSON.stringify(c.payload, null, 2))}</pre>`;
+    }
+    const arrow = isOut ? '↑' : '↓';
+    return `<div class="cmd-entry ${dir}" id="tcmd-${i}" onclick="toggleTrackingCmd(${i})">
+      <div class="cmd-meta">
+        <span class="cmd-ts">${fmtTime(c.ts)}</span>
+        ${eventBadge}
+        <span class="cmd-topic" title="${escH(c.topic)}">${arrow} …/${escH(topicShort)}</span>
+      </div>
+      <div class="cmd-preview">${escH(preview)}${preview.length < JSON.stringify(c.payload).length && eventType !== 'ha_command' ? '…' : ''}</div>
+      <div class="cmd-detail">${detailHTML}</div>
+    </div>`;
+  }).join('');
+  if (document.getElementById('trackingAutoScroll').checked) { log.scrollTop = 0; }
+}
+
+function toggleTrackingCmd(i) {
+  const el = document.getElementById('tcmd-' + i);
+  if (el) el.classList.toggle('expanded');
+}
+
+async function clearTrackingBuffer() {
+  try {
+    await apiFetch('/dev/tracking/clear', { method: 'POST' });
+    trackingLog = [];
+    renderTrackingLog();
+    toast('Буфер отслеживания очищен', 'ok');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 'err');
+  }
+}
+
+function startTrackingStream() {
+  if (!trackingActive || !trackingDeviceId) { return; }
+  const url = `${API}/dev/tracking/stream?token=${encodeURIComponent(TOKEN)}`;
+  trackingEventSource = new EventSource(url);
+  trackingEventSource.onopen = () => {
+    trackingStreamActive = true;
+    const pill = document.getElementById('trackingStreamPill');
+    pill.style.display = '';
+    pill.className = 'stream-pill live';
+    document.getElementById('trackingStreamBlink').style.display = '';
+    document.getElementById('trackingStreamStatus').textContent = 'live';
+  };
+  trackingEventSource.onmessage = (e) => {
+    try {
+      const cmd = JSON.parse(e.data);
+      trackingLog.push(cmd);
+      if (trackingLog.length > 500) trackingLog.splice(0, trackingLog.length - 500);
+      renderTrackingLog();
+    } catch { }
+  };
+  trackingEventSource.onerror = () => { stopTrackingStream(); };
+}
+
+function stopTrackingStream() {
+  if (trackingEventSource) { trackingEventSource.close(); trackingEventSource = null; }
+  trackingStreamActive = false;
+  const pill = document.getElementById('trackingStreamPill');
+  pill.style.display = 'none';
+  pill.className = 'stream-pill';
+  document.getElementById('trackingStreamBlink').style.display = 'none';
+  document.getElementById('trackingStreamStatus').textContent = '● offline';
+}
+
+function exportTrackingLog() {
+  const activeTypes = getEnabledTrackingTypes();
+  const filtered = trackingLog.filter(c => { const eventType = c.event_type || 'other'; return activeTypes.includes(eventType); });
+  if (!filtered.length) { toast('Нет сообщений для экспорта', 'err'); return; }
+  const EVENT_TYPE_LABELS = { 'sber_command': '← Команда Сбера', 'sber_status_request': '← Запрос статуса', 'sber_config_request': '← Запрос конфига', 'ha_command': '→ Команда в HA', 'ha_status_update': '→ Отправка статуса HA', 'ha_config_update': '→ Отправка конфига HA', 'sber_error': '! Ошибка Сбера', 'ha_state_change': '~ Изменение состояния HA', 'other': '· Прочее' };
+  const lines = filtered.slice().reverse().map(c => {
+    const eventType = c.event_type || 'other';
+    const dirLabel = EVENT_TYPE_LABELS[eventType] || eventType;
+    const dt = new Date(c.ts * 1000).toLocaleString('ru-RU', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    return [`[${dt}] [${dirLabel}] ${c.topic}`, JSON.stringify(c.payload, null, 2), '\u2500'.repeat(60)].join('\n');
+  });
+  const ts = new Date();
+  const deviceName = trackingDevices.find(d => d.id === trackingDeviceId)?.name || trackingDeviceId;
+  const header = ['Sber MQTT — Лог отслеживания устройства', 'Устройство: ' + deviceName + ' (' + trackingDeviceId + ')', 'Экспорт: ' + ts.toLocaleString('ru-RU'), 'Записей: ' + filtered.length, '\u2550'.repeat(60), ''].join('\n');
+  const text = header + lines.join('\n\n');
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const fname = 'sber_mqtt_tracking_' + trackingDeviceId + '_' + ts.toISOString().slice(0, 19).replace(/:/g, '-') + '.txt';
+  a.href = url; a.download = fname; a.click(); URL.revokeObjectURL(url);
+  toast('Экспортировано ' + filtered.length + ' записей ✓', 'ok');
 }
 
 // ── Utils ──────────────────────────────────────────────────────────────────
