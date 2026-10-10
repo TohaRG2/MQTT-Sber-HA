@@ -43,7 +43,14 @@ DEVICE_TYPE_HUMIDIFIER      = "humidifier"       # Увлажнитель воз
 DEVICE_TYPE_SOCKET          = "socket"           # Розетка с энергомониторингом
 DEVICE_TYPE_SMOKE           = "smoke"            # Датчик дыма
 DEVICE_TYPE_KETTLE          = "kettle"           # Чайник
-DEVICE_TYPE_TV              = "tv"               # Телевизор (media_player)
+DEVICE_TYPE_SENSOR_DOOR     = "sensor_door"      # Датчик открытия двери/окна
+DEVICE_TYPE_SENSOR_AIR      = "sensor_air"       # Датчик качества воздуха
+DEVICE_TYPE_HVAC_RADIATOR   = "hvac_radiator"    # Термоголовка радиатора
+DEVICE_TYPE_HVAC_FAN        = "hvac_fan"         # Вентилятор / бризер
+DEVICE_TYPE_TV              = "tv"               # Телевизор
+DEVICE_TYPE_INTERCOM         = "intercom"         # Домофон
+DEVICE_TYPE_SENSOR_PIR       = "sensor_pir"       # Датчик движения
+DEVICE_TYPE_EVENT_BUTTON     = "event_button"     # Кнопка событий HA → Сбер
 DEVICE_TYPE_AIR_PURIFIER    = "air_purifier"     # Очиститель воздуха (набор сущностей HA)
 
 # Маппинг скоростей вентилятора Сбер → HA (humidifier mode)
@@ -58,6 +65,16 @@ SBER_AIR_FLOW_TO_HA_MODE: dict[str, str] = {
     "quiet":  "quiet",
 }
 HA_MODE_TO_SBER_AIR_FLOW: dict[str, str] = {v: k for k, v in SBER_AIR_FLOW_TO_HA_MODE.items()}
+
+# Маппинг скоростей Сбер → процент для fan (hvac_fan)
+SBER_AIR_FLOW_TO_FAN_PCT: dict[str, int] = {
+    "auto":   50,
+    "low":    25,
+    "medium": 50,
+    "high":   75,
+    "turbo":  100,
+    "quiet":  10,
+}
 
 # ── Маппинги вентилятора кондиционера (hvac_ac) ───────────────────────────
 
@@ -125,17 +142,24 @@ SUPPORTED_DEVICE_TYPES = {
     DEVICE_TYPE_SOCKET:          "Розетка",
     DEVICE_TYPE_SMOKE:           "Датчик дыма",
     DEVICE_TYPE_KETTLE:          "Чайник",
+    DEVICE_TYPE_SENSOR_DOOR:     "Датчик открытия",
+    DEVICE_TYPE_SENSOR_AIR:      "Датчик качества воздуха",
+    DEVICE_TYPE_HVAC_RADIATOR:   "Термоголовка радиатора",
+    DEVICE_TYPE_HVAC_FAN:        "Бризер / вентилятор",
     DEVICE_TYPE_TV:              "Телевизор",
+    DEVICE_TYPE_INTERCOM:        "Домофон",
+    DEVICE_TYPE_SENSOR_PIR:      "Датчик движения",
+    DEVICE_TYPE_EVENT_BUTTON:    "Кнопка событий (event → Сбер)",
     DEVICE_TYPE_AIR_PURIFIER:    "Очиститель воздуха",
 }
 
 # ── Домены HA для типа "реле" ─────────────────────────────────────────────
 # Только сущности из этих доменов можно привязать как реле
-RELAY_DOMAINS = {"switch", "input_boolean", "script", "button", "input_button", "light", "media_player"}
+RELAY_DOMAINS = {"switch", "input_boolean", "button", "input_button", "light", "media_player"}
 
 # Домены у которых нет состояния on/off (кнопки, сценарии)
 # Для них всегда отправляем on_off=false и не отслеживаем изменения состояния
-RELAY_BUTTON_DOMAINS = {"script", "button", "input_button"}
+RELAY_BUTTON_DOMAINS = {"script", "button", "input_button", "automation"}
 
 # Домены у которых есть состояние on/off (отслеживаем через state_tracker)
 # media_player: состояние "off" → выключен, всё остальное (on/idle/playing/paused) → включён
@@ -211,6 +235,14 @@ SBER_VACUUM_COMMAND_TO_HA = {
     "pause":          ("vacuum", "pause"),
     "return_to_dock": ("vacuum", "return_to_base"),
 }
+
+# ── Домены HA для типа "датчик открытия" ──────────────────────────────────
+# Датчик открытия двери/окна: binary_sensor с device_class door/window/opening/garage_door
+SENSOR_DOOR_DEVICE_CLASSES = {"door", "window", "opening", "garage_door"}
+
+# Маппинг HA состояния → doorcontact_state Сбера
+# HA: on → дверь открыта, off → дверь закрыта
+HA_DOOR_STATE_TO_SBER = {"on": "open", "off": "close"}
 
 # ── Домены HA для типа "кран" ─────────────────────────────────────────────
 VALVE_DOMAINS = {"valve", "switch"}

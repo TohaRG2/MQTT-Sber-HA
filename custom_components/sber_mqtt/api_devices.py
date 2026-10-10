@@ -103,9 +103,18 @@ class SberDevicesView(HomeAssistantView):
                 {"error": f"Unsupported device_type: {device_type}"}, status=400
             )
         if registry.device_exists(device_id):
-            return web.json_response(
-                {"error": f"Device ID '{device_id}' already exists"}, status=409
-            )
+            # Upsert: обновить существующее устройство
+            existing = registry.get_device(device_id)
+            existing["name"] = name
+            if "room" in body:
+                existing["room"] = body["room"]
+            if attrs:
+                existing["attributes"] = {**existing.get("attributes", {}), **attrs}
+            await registry.async_save()
+            state_tracker.refresh()
+            config_payload = serializer.build_config_payload(registry.devices)
+            mqtt_client.publish_config(config_payload)
+            return web.json_response({"ok": True, "device": existing})
 
         # Валидация специфичная для типа устройства
         if device_type == DEVICE_TYPE_RELAY:
@@ -336,6 +345,38 @@ class SberDeviceView(HomeAssistantView):
     def __init__(self, hass: HomeAssistant) -> None:
         pass
 
+    async def put(self, request: web.Request, device_id: str) -> web.Response:
+        """Обновляет устройство: имя, комната, атрибуты."""
+        hass: HomeAssistant = request.app["hass"]
+        data = _get_entry_data(hass)
+        if not data:
+            return web.json_response({"error": "Integration not loaded"}, status=503)
+
+        body = await request.json()
+        registry      = data["device_registry"]
+        serializer    = data["serializer"]
+        mqtt_client   = data["mqtt_client"]
+        state_tracker = data["state_tracker"]
+
+        existing = registry.get_device(device_id)
+        if not existing:
+            return web.json_response({"error": "Device not found"}, status=404)
+
+        # Обновляем поля
+        if "name" in body:
+            existing["name"] = body["name"]
+        if "room" in body:
+            existing["room"] = body["room"]
+        if "attributes" in body:
+            existing["attributes"] = {**existing.get("attributes", {}), **body["attributes"]}
+
+        await registry.async_save()
+        state_tracker.refresh()
+        config_payload = serializer.build_config_payload(registry.devices)
+        mqtt_client.publish_config(config_payload)
+
+        return web.json_response({"ok": True, "device": existing})
+
     async def delete(self, request: web.Request, device_id: str) -> web.Response:
         """Удаляет устройство, обновляет подписки и переотправляет конфиг."""
         hass: HomeAssistant = request.app["hass"]
@@ -522,6 +563,52 @@ class SberPanelView(HomeAssistantView):
         return web.Response(text=html, content_type="text/html")
 
 
+# ── GET/POST /api/sber_mqtt/settings ────────────────────────────────────
+
+class SberSettingsView(HomeAssistantView):
+    """Настройки интеграции: выбор пользователя HA для действий из Сбера."""
+
+    url  = "/api/sber_mqtt/settings"
+    name = "api:sber_mqtt:settings"
+    requires_auth = True
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        pass
+
+    async def get(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        data = _get_entry_data(hass)
+        user_id = (data or {}).get("config", {}).get("user_id", "")
+        users = []
+        # Имена из person registry (friendly_name) для лучшего отображения
+        person_names: dict[str, str] = {}
+        try:
+            from homeassistant.helpers import entity_registry as er
+            ent_reg = er.async_get(hass)
+            for entry in ent_reg.entities.values():
+                if entry.domain == "person" and entry.unique_id:
+                    person_names[entry.unique_id] = entry.name or entry.original_name or ""
+        except Exception:
+            pass
+        for u in await hass.auth.async_get_users():
+            users.append({
+                "id": u.id,
+                "name": person_names.get(u.id) or u.name or u.id,
+                "is_active": u.is_active,
+            })
+        return web.json_response({"users": users, "user_id": user_id})
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        data = _get_entry_data(hass)
+        if not data:
+            return web.json_response({"error": "Integration not loaded"}, status=503)
+        body = await request.json()
+        user_id = body.get("user_id", "")
+        data["config"]["user_id"] = user_id
+        if handler := data.get("command_handler"):
+            handler.set_user_id(user_id)
+        return web.json_response({"ok": True, "user_id": user_id})
 def _validate_air_purifier_attrs(attrs: dict) -> str | None:
     """Проверяет и нормализует (на месте) настройки очистителя воздуха.
 

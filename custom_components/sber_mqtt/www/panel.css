@@ -102,9 +102,34 @@ body {
   margin-bottom: 16px;
   gap: 10px;
   flex-wrap: wrap;
+  position: sticky;
+  top: 56px;
+  z-index: 99;
+  background: var(--primary-background-color, var(--card-bg, var(--card)));
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--border, #e0e0e0);
 }
 
 .toolbar-l { font-size: 14px; color: var(--muted); }
+
+.search-bar {
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--border, #e0e0e0);
+  border-radius: 8px;
+  margin: 0 0 10px 0;
+  overflow: hidden;
+}
+.search-bar input {
+  border: none;
+  background: none;
+  flex: 1;
+  padding: 8px 12px;
+  font-size: 13px;
+  outline: none;
+  color: var(--text, #222);
+}
+.search-bar input::placeholder { color: var(--muted); }
 
 /* ═══════════════════════════════════════════════════════════
    КНОПКИ
@@ -282,7 +307,7 @@ td.del-col        { vertical-align: middle; text-align: center; }
   background: var(--card);
   border-radius: 14px;
   width: 100%;
-  max-width: 660px;
+  max-width: 800px;
   display: flex;
   flex-direction: column;
   box-shadow: 0 20px 60px rgba(0,0,0,.2);
@@ -391,6 +416,17 @@ input:focus, select:focus {
 .type-icon { font-size: 26px; line-height: 1; flex-shrink: 0; }
 .type-name { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
 .type-desc { font-size: 12px; color: var(--muted); }
+
+.type-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+@media (max-width: 500px) {
+  .type-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 /* ═══════════════════════════════════════════════════════════
    WIZARD — ПИКЕР СУЩНОСТЕЙ
@@ -547,3 +583,74 @@ input:focus, select:focus {
 .toast.show { transform: translateY(0); opacity: 1; }
 .toast.ok   { background: var(--primary); }
 .toast.err  { background: var(--danger); }
+
+.btn-gear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--muted);
+  padding: 4px;
+  border-radius: 6px;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 8px;
+}
+.btn-gear:hover { background: var(--bg); color: var(--primary); }
+
+/* Floating Action Button */
+.fab {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--primary);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 3px 10px rgba(0,0,0,.25);
+  z-index: 100;
+  opacity: 0;
+  transform: scale(.8);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+}
+.fab.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.fab-top {
+  position: fixed;
+  bottom: 24px;
+  right: 32px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: var(--primary-background-color, var(--card-bg, var(--card)));
+  color: var(--primary);
+  border: 1px solid var(--border, #e0e0e0);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  box-shadow: 0 2px 6px rgba(0,0,0,.15);
+  z-index: 100;
+  opacity: 0;
+  transform: scale(.8);
+  transition: opacity .2s, transform .2s;
+  pointer-events: none;
+}
+.fab-top.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}

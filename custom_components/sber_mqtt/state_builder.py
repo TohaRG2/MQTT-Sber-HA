@@ -28,7 +28,14 @@ from .const import (
     HA_AC_SWING_TO_SBER,
     DEVICE_TYPE_SMOKE,
     DEVICE_TYPE_KETTLE,
+    DEVICE_TYPE_SENSOR_DOOR,
+    DEVICE_TYPE_SENSOR_AIR,
+    DEVICE_TYPE_HVAC_RADIATOR,
+    DEVICE_TYPE_HVAC_FAN,
     DEVICE_TYPE_TV,
+    DEVICE_TYPE_INTERCOM,
+    DEVICE_TYPE_SENSOR_PIR,
+    DEVICE_TYPE_EVENT_BUTTON,
     DEVICE_TYPE_AIR_PURIFIER,
     TV_OFF_STATES,
     AIR_PURIFIER_BOOL_FEATURES,
@@ -299,6 +306,103 @@ def build_current_state_payload(
             _sensor_bool(hass, attrs.get("alarm_mute_entity")),
         )
 
+    # ── Датчик открытия двери/окна ──────────────────────────────────────
+    if device_type == DEVICE_TYPE_SENSOR_DOOR:
+        entity_id = attrs.get("entity_id", "")
+        ds = hass.states.get(entity_id)
+        if not ds:
+            return None
+        return serializer.build_sensor_door_state_payload(
+            device_id,
+            ds.state == "on",
+            _sensor_float(hass, attrs.get("battery_entity")),
+            _sensor_bool(hass, attrs.get("tamper_entity")),
+        )
+
+    # ── Датчик качества воздуха ─────────────────────────────────────────
+    if device_type == DEVICE_TYPE_SENSOR_AIR:
+        return serializer.build_sensor_air_state_payload(
+            device_id,
+            temperature=_sensor_float(hass, attrs.get("temperature_entity")),
+            humidity=_sensor_float(hass, attrs.get("humidity_entity")),
+            co2=_sensor_float(hass, attrs.get("co2_entity")),
+            pm25=_sensor_float(hass, attrs.get("pm25_entity")),
+            tvoc=_sensor_float(hass, attrs.get("tvoc_entity")),
+            battery=_sensor_float(hass, attrs.get("battery_entity")),
+            signal_strength=_sensor_float(hass, attrs.get("signal_entity")),
+        )
+
+    # ── Термоголовка радиатора ──────────────────────────────────────────
+    if device_type == DEVICE_TYPE_HVAC_RADIATOR:
+        entity_id = attrs.get("entity_id", "")
+        cs = hass.states.get(entity_id)
+        if not cs:
+            return None
+        is_on = cs.state != "off"
+        current_temp = _sensor_float(hass, attrs.get("temperature_entity"))
+        if current_temp is None:
+            current_temp = _safe_float(cs, "current_temperature")
+        return serializer.build_hvac_radiator_state_payload(
+            device_id, is_on,
+            target_temp=_safe_float(cs, "temperature"),
+            current_temp=current_temp,
+        )
+
+    # ── Вентилятор / бризер ─────────────────────────────────────────────
+    if device_type == DEVICE_TYPE_HVAC_FAN:
+        entity_id = attrs.get("entity_id", "")
+        fs = hass.states.get(entity_id)
+        if not fs:
+            return None
+        is_on = fs.state != "off"
+        domain = entity_id.split(".")[0] if entity_id else "fan"
+        air_flow_power: str | None = None
+        if domain == "climate":
+            fan_mode = fs.attributes.get("fan_mode")
+            if fan_mode:
+                air_flow_power = HA_MODE_TO_SBER_AIR_FLOW.get(fan_mode)
+        else:
+            pct = fs.attributes.get("percentage")
+            preset = fs.attributes.get("preset_mode")
+            if preset:
+                air_flow_power = HA_MODE_TO_SBER_AIR_FLOW.get(preset)
+            if air_flow_power is None and pct is not None:
+                try:
+                    p = float(pct)
+                    if p <= 15:      air_flow_power = "quiet"
+                    elif p <= 35:    air_flow_power = "low"
+                    elif p <= 65:    air_flow_power = "medium"
+                    elif p <= 85:    air_flow_power = "high"
+                    else:            air_flow_power = "turbo"
+                except (ValueError, TypeError):
+                    pass
+        return serializer.build_hvac_fan_state_payload(device_id, is_on, air_flow_power)
+
+
+    # ── Домофон ─────────────────────────────────────────────────────────
+    if device_type == DEVICE_TYPE_INTERCOM:
+        entity_id = attrs.get("entity_id", "")
+        return serializer.build_intercom_state_payload(
+            device_id,
+            incoming_call=_sensor_bool(hass, attrs.get("incoming_call_entity")),
+        )
+
+    # ── Датчик движения ─────────────────────────────────────────────────
+    if device_type == DEVICE_TYPE_SENSOR_PIR:
+        entity_id = attrs.get("entity_id", "")
+        ps = hass.states.get(entity_id)
+        if not ps:
+            return None
+        return serializer.build_sensor_pir_state_payload(
+            device_id,
+            ps.state == "on",
+            _sensor_float(hass, attrs.get("battery_entity")),
+        )
+
+    # ── Кнопка событий ─────────────────────────────────────────────────
+    if device_type == DEVICE_TYPE_EVENT_BUTTON:
+        return serializer.build_scenario_button_online_payload(device_id)
+
     # ── Чайник ───────────────────────────────────────────────────────────
     if device_type == DEVICE_TYPE_KETTLE:
         entity_id = attrs.get("entity_id", "")
@@ -316,7 +420,9 @@ def build_current_state_payload(
         target_temp = _safe_float(ks, "temperature")
 
         return serializer.build_kettle_state_payload(
-            device_id, is_on, current_temp, target_temp
+            device_id, is_on, current_temp, target_temp,
+            water_level=_sensor_float(hass, attrs.get("water_entity")),
+            water_low=_sensor_bool(hass, attrs.get("water_low_entity")),
         )
 
     # ── Телевизор ────────────────────────────────────────────────────────

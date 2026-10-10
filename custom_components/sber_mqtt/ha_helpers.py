@@ -18,7 +18,7 @@ from homeassistant.helpers import (
 _LOGGER = logging.getLogger(__name__)
 
 # Домены HA которые можно привязать как реле
-RELAY_DOMAINS = ["switch", "input_boolean", "script", "button", "input_button", "light", "media_player"]
+RELAY_DOMAINS = ["switch", "input_boolean", "script", "button", "input_button", "light", "media_player", "automation"]
 
 # Домены для датчиков (только sensor)
 SENSOR_TEMP_DOMAINS = ["sensor"]
@@ -129,8 +129,9 @@ def get_sensor_entities(hass: HomeAssistant, device_classes: list[str]) -> list[
             if state:
                 dc = state.attributes.get("device_class", "")
 
-        # Фильтруем по запрошенным классам
-        if dc not in device_classes:
+        # Фильтруем по запрошенным классам (пустой список = все)
+        # Сенсоры без device_class (template и т.п.) пропускаем всегда
+        if device_classes and dc and dc not in device_classes:
             continue
 
         state = hass.states.get(entry.entity_id)

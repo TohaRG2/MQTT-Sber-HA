@@ -401,7 +401,7 @@ class SberMQTTClient:
             _LOGGER.error("MQTT ← команды: невалидный JSON: %s", payload_str[:200])
             return
 
-        _LOGGER.info("MQTT ← команды: %s", json.dumps(data, ensure_ascii=False))
+        _LOGGER.info("MQTT ← команды: %s", payload_str)
 
         # Передаём каждую команду в обработчик бизнес-логики
         for device_id, device_data in data.get("devices", {}).items():

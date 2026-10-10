@@ -81,6 +81,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # 3. HA command handler
     command_handler = HACommandHandler(hass)
+    command_handler.set_user_id(config.get("user_id"))
 
     # 4. MQTT client — all callbacks are closures over hass/registry/serializer
     #    No circular references, no access to private attributes
@@ -280,12 +281,22 @@ def _register_http_views(hass: HomeAssistant) -> None:
         SberHAEntitiesWaterHeaterView,
         SberHAEntitiesSocketView,
         SberHAEntitiesSmokeView,
+        SberHAEntitiesDoorView,
+        SberHAEntitiesAirView,
+        SberHAEntitiesRadiatorView,
+        SberHAEntitiesFanView,
         SberHAEntitiesTVView,
+        SberHAEntitiesWaterSensorView,
+        SberHAEntitiesIntercomView,
+        SberHAEntitiesSensorPirView,
+        SberHAAutomationTriggersView,
+        SberHAEventButtonsView,
         SberHAEntitiesAirPurifierView,
         SberPublishConfigView,
         SberPublishStatusView,
         SberPanelView,
         SberDeviceTypesView,
+        SberSettingsView,
         SberConnectionStatusView,
         # Dev Tools
         SberDevConfigRawView,
@@ -320,12 +331,22 @@ def _register_http_views(hass: HomeAssistant) -> None:
     hass.http.register_view(SberHAEntitiesWaterHeaterView(hass))
     hass.http.register_view(SberHAEntitiesSocketView(hass))
     hass.http.register_view(SberHAEntitiesSmokeView(hass))
+    hass.http.register_view(SberHAEntitiesDoorView(hass))
+    hass.http.register_view(SberHAEntitiesAirView(hass))
+    hass.http.register_view(SberHAEntitiesRadiatorView(hass))
+    hass.http.register_view(SberHAEntitiesFanView(hass))
     hass.http.register_view(SberHAEntitiesTVView(hass))
+    hass.http.register_view(SberHAEntitiesWaterSensorView(hass))
+    hass.http.register_view(SberHAEntitiesIntercomView(hass))
+    hass.http.register_view(SberHAEntitiesSensorPirView(hass))
+    hass.http.register_view(SberHAAutomationTriggersView(hass))
+    hass.http.register_view(SberHAEventButtonsView(hass))
     hass.http.register_view(SberHAEntitiesAirPurifierView(hass))
     hass.http.register_view(SberPublishConfigView(hass))
     hass.http.register_view(SberPublishStatusView(hass))
     hass.http.register_view(SberPanelView(hass))
     hass.http.register_view(SberDeviceTypesView(hass))
+    hass.http.register_view(SberSettingsView(hass))
     hass.http.register_view(SberConnectionStatusView(hass))
     # Dev Tools
     hass.http.register_view(SberDevConfigRawView(hass))

@@ -34,7 +34,14 @@ from .const import (
     DEVICE_TYPE_SOCKET,
     DEVICE_TYPE_SMOKE,
     DEVICE_TYPE_KETTLE,
+    DEVICE_TYPE_SENSOR_DOOR,
+    DEVICE_TYPE_SENSOR_AIR,
+    DEVICE_TYPE_HVAC_RADIATOR,
+    DEVICE_TYPE_HVAC_FAN,
     DEVICE_TYPE_TV,
+    DEVICE_TYPE_INTERCOM,
+    DEVICE_TYPE_SENSOR_PIR,
+    DEVICE_TYPE_EVENT_BUTTON,
     DEVICE_TYPE_AIR_PURIFIER,
     RELAY_STATEFUL_DOMAINS,
     RELAY_BUTTON_DOMAINS,
@@ -64,16 +71,22 @@ class StateTracker:
 
         # Функция отмены подписки (возвращается async_track_state_change_event)
         self._unsubscribe: Callable | None = None
+        # Слушатели событий HA для event_button
+        self._event_listeners: list[Callable] = []
 
     def start(self) -> None:
         """Запускает отслеживание — подписывается на изменения сущностей."""
         self.refresh()
+        self._setup_event_listeners()
 
     def stop(self) -> None:
         """Останавливает отслеживание — отменяет все подписки."""
         if self._unsubscribe:
             self._unsubscribe()
             self._unsubscribe = None
+        for unsub in self._event_listeners:
+            unsub()
+        self._event_listeners.clear()
 
     def refresh(self) -> None:
         """Пересобирает список отслеживаемых сущностей.
@@ -186,6 +199,52 @@ class StateTracker:
                 entity_id = attrs.get("entity_id", "")
                 if entity_id:
                     watched.add(entity_id)
+                for key in ("water_entity", "water_low_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
+
+            elif device_type == DEVICE_TYPE_SENSOR_DOOR:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                for key in ("battery_entity", "tamper_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
+
+            elif device_type == DEVICE_TYPE_SENSOR_AIR:
+                for key in ("temperature_entity", "humidity_entity", "co2_entity",
+                            "pm25_entity", "tvoc_entity", "battery_entity", "signal_entity"):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
+
+            elif device_type == DEVICE_TYPE_HVAC_RADIATOR:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                temp_entity = attrs.get("temperature_entity", "")
+                if temp_entity:
+                    watched.add(temp_entity)
+
+            elif device_type == DEVICE_TYPE_HVAC_FAN:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+
+            elif device_type == DEVICE_TYPE_INTERCOM:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                inc_entity = attrs.get("incoming_call_entity", "")
+                if inc_entity:
+                    watched.add(inc_entity)
+
+            elif device_type == DEVICE_TYPE_SENSOR_PIR:
+                entity_id = attrs.get("entity_id", "")
+                if entity_id:
+                    watched.add(entity_id)
+                for key in ("battery_entity",):
+                    if attrs.get(key):
+                        watched.add(attrs[key])
 
             elif device_type == DEVICE_TYPE_TV:
                 entity_id = attrs.get("entity_id", "")
@@ -208,6 +267,12 @@ class StateTracker:
             list(watched),
             self._handle_state_change,
         )
+
+        # Переподписываемся на события
+        for unsub in self._event_listeners:
+            unsub()
+        self._event_listeners.clear()
+        self._setup_event_listeners()
 
     @callback
     def _handle_state_change(self, event: Event) -> None:
@@ -296,6 +361,30 @@ class StateTracker:
             }
 
         elif device_type == DEVICE_TYPE_KETTLE:
+            watched = {attrs.get("entity_id", ""), attrs.get("water_entity", ""), attrs.get("water_low_entity", "")}
+
+        elif device_type == DEVICE_TYPE_SENSOR_DOOR:
+            watched = {
+                attrs.get("entity_id", ""),
+                attrs.get("battery_entity", ""),
+                attrs.get("tamper_entity", ""),
+            }
+
+        elif device_type == DEVICE_TYPE_SENSOR_AIR:
+            watched = {
+                attrs.get("temperature_entity", ""),
+                attrs.get("humidity_entity", ""),
+                attrs.get("co2_entity", ""),
+                attrs.get("pm25_entity", ""),
+                attrs.get("tvoc_entity", ""),
+                attrs.get("battery_entity", ""),
+                attrs.get("signal_entity", ""),
+            }
+
+        elif device_type == DEVICE_TYPE_HVAC_RADIATOR:
+            watched = {attrs.get("entity_id", ""), attrs.get("temperature_entity", "")}
+
+        elif device_type == DEVICE_TYPE_HVAC_FAN:
             watched = {attrs.get("entity_id", "")}
 
         elif device_type == DEVICE_TYPE_TV:
@@ -308,6 +397,12 @@ class StateTracker:
             # режимы, ресурс фильтра, доступность) — следим за всеми
             from .air_purifier import watched_entities
             watched = watched_entities(attrs)
+
+        elif device_type == DEVICE_TYPE_INTERCOM:
+            watched = {attrs.get("entity_id", ""), attrs.get("incoming_call_entity", "")}
+
+        elif device_type == DEVICE_TYPE_SENSOR_PIR:
+            watched = {attrs.get("entity_id", ""), attrs.get("battery_entity", "")}
 
         else:
             return
@@ -407,3 +502,47 @@ class StateTracker:
         self._hass.async_create_task(
             self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
         )
+
+    def _setup_event_listeners(self) -> None:
+        """Подписывается на HA-события для кнопок событий."""
+        devices = self._get_devices()
+        events_to_listen: set[str] = set()
+        for device in devices.values():
+            if device.get("device_type") != DEVICE_TYPE_EVENT_BUTTON:
+                continue
+            event_type = (device.get("attributes") or {}).get("event_type", "")
+            if event_type:
+                events_to_listen.add(event_type)
+
+        for event_type in events_to_listen:
+            unsub = self._hass.bus.async_listen(event_type, self._handle_event)
+            self._event_listeners.append(unsub)
+
+    @callback
+    def _handle_event(self, event: Event) -> None:
+        """Обрабатывает HA-событие — маппит на button_event."""
+        import json as _json
+        event_type = event.event_type
+        event_data = event.data or {}
+        action = event_data.get("action", "")
+        _LOGGER.warning("EventButton: received %s action=%s", event_type, action)
+
+        devices = self._get_devices()
+        for device_id, device in devices.items():
+            if device.get("device_type") != DEVICE_TYPE_EVENT_BUTTON:
+                continue
+            attrs = device.get("attributes") or {}
+            if attrs.get("event_type") != event_type:
+                continue
+            # Маппинг action → button_event
+            action_map = attrs.get("action_map") or {}
+            if isinstance(action_map, dict):
+                for btn_action, btn_event in action_map.items():
+                    if action == btn_action:
+                        payload = self._serializer.build_scenario_button_event_payload(device_id, btn_event)
+                        _LOGGER.debug("EventButton %s: %s → %s", device_id, action, btn_event)
+                        self._publish_status(payload)
+                        self._hass.async_create_task(
+                            self._update_last_state(device_id, _json.loads(payload)["devices"][device_id])
+                        )
+                        return

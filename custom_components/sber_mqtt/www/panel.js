@@ -1,6 +1,32 @@
 // Sber MQTT Bridge — панель управления
 // Токен вшивается сервером: window.HA_ACCESS_TOKEN
 
+// ── Настройки ─────────────────────────────────────────────────────────
+async function openSettings(){
+  try{
+    const r=await api('/api/sber_mqtt/settings');
+    const sel=document.getElementById('settingsUser');
+    sel.innerHTML='<option value="">— без указания —</option>'+(r.users||[]).map(u=>`<option value="${esc(u.id)}" ${u.id===r.user_id?'selected':''}>${esc(u.name)}</option>`).join('');
+    document.getElementById('settingsOverlay').style.display='flex';
+  }catch(e){toast('Ошибка: '+e.message,'err');}
+}
+function closeSettings(){document.getElementById('settingsOverlay').style.display='none';}
+async function saveSettings(){
+  const user_id=document.getElementById('settingsUser').value;
+  try{
+    await api('/api/sber_mqtt/settings',{method:'POST',body:JSON.stringify({user_id})});
+    closeSettings();
+    toast('Сохранено','ok');
+  }catch(e){toast('Ошибка: '+e.message,'err');}
+}
+
+// Floating Action Button — показывать когда кнопка «Добавить» ушла за скролл
+window.addEventListener('scroll',()=>{
+  const fabTop=document.querySelector('.fab-top');
+  const show=window.scrollY>120;
+  if(fabTop)fabTop.classList.toggle('visible',show);
+});
+
 
 // ═══════════════════════════════════════════════════════════
 // API
@@ -43,6 +69,16 @@ const STEPS = {
   air_purifier:    ['Тип устройства','Функции и сущности HA','Параметры'],
   humidifier:      ['Тип устройства','Источник в HA','Параметры'],
   socket:          ['Тип устройства','Источник в HA','Параметры'],
+  sensor_door:     ['Тип устройства','Датчик в HA','Параметры'],
+  sensor_air:      ['Тип устройства','Датчики в HA','Параметры'],
+  sensor_pir:      ['Тип устройства','Датчик в HA','Параметры'],
+  hvac_radiator:   ['Тип устройства','Источник в HA','Параметры'],
+  hvac_fan:        ['Тип устройства','Источник в HA','Параметры'],
+  tv:              ['Тип устройства','Источник в HA','Параметры'],
+  intercom:        ['Тип устройства','Источник в HA','Параметры'],
+  automation_relay:['Тип устройства','Автоматизация в HA','Параметры'],
+  script_relay:    ['Тип устройства','Сценарий / скрипт в HA','Параметры'],
+  event_button:    ['Тип устройства','Настройка события','Параметры'],
 };
 
 let devices=[], sortField='name', sortAsc=true, delId=null;
@@ -50,6 +86,7 @@ let wStep=1, wType=null, wData={}, haRelay=[], haSensors=[], haSocket=[], sFilte
 
 // Множество entity_id, уже используемых в добавленных устройствах
 let usedEntities=new Set();
+let devFilter='';
 function refreshUsedEntities(){
   usedEntities=new Set();
   const attrKeys=['entity_id','power_entity','current_entity','voltage_entity',
@@ -67,6 +104,12 @@ function refreshUsedEntities(){
 function isUsed(eid){return usedEntities.has(eid);}
 function usedCls(eid){return isUsed(eid)?'used':'';}
 function usedBadge(eid){return isUsed(eid)?'<span class="p-used-badge">уже добавлено</span>':'';}
+
+function autoBadge(eid){
+  const used=devices.filter(d=>d.attributes&&d.attributes.entity_id===eid);
+  if(!used.length)return'';
+  return used.map(d=>'<span class="p-used-badge">уже добавлено'+(d.attributes.trigger_id?': '+d.attributes.trigger_id:'')+'</span>').join(' ');
+}
 
 
 async function loadStatus() {
@@ -114,7 +157,10 @@ function fmtState(s) {
 // ТАБЛИЦА УСТРОЙСТВ
 // ═══════════════════════════════════════════════════════════
 function renderTable() {
-  const rows=[...devices].sort((a,b)=>{
+  let filtered = devFilter
+    ? devices.filter(d => (d.name||'').toLowerCase().includes(devFilter))
+    : [...devices];
+  const rows=filtered.sort((a,b)=>{
     const va=(a[sortField]||'').toString().toLowerCase();
     const vb=(b[sortField]||'').toString().toLowerCase();
     return sortAsc?va.localeCompare(vb,'ru'):vb.localeCompare(va,'ru');
@@ -143,7 +189,7 @@ function renderTable() {
           </button>
         </div>
       </td>
-      <td class="del-col"><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
+      <td class="del-col"><button class="btn btn-ghost btn-sm" onclick="editDevice('${esc(d.id)}')">✏️</button><button class="btn btn-ghost btn-sm" onclick="askDel('${esc(d.id)}','${esc(d.name)}')">🗑</button></td>
     </tr>`;
   }).join('');
 }
@@ -268,6 +314,19 @@ async function publishOneStatus(deviceId){
 
 function askDel(id,name){delId=id;document.getElementById('confTxt').textContent=`Устройство «${name}» будет удалено.`;document.getElementById('conf').style.display='flex';}
 function closeConf(){delId=null;document.getElementById('conf').style.display='none';}
+
+function editDevice(id){
+  const d=devices.find(x=>x.id===id);if(!d)return;
+  wType=d.device_type;
+  wData={id:d.id,name:d.name,room:d.room||'',_edit:true};
+  const a=d.attributes||{};
+  for(const [k,v] of Object.entries(a)){wData[k]=v;wData[k+'_name']=v;wData[k+'_area']='';}
+  wStep=1;
+  document.getElementById('wiz').style.display='';
+  renderWiz();
+  // Программно жмём «Далее» чтобы попасть на шаг 2 с загрузкой данных
+  setTimeout(()=>document.getElementById('btnNext')?.click(),100);
+}
 async function doDelete(){
   if(!delId)return;const id=delId;closeConf();
   try{await api(`/api/sber_mqtt/devices/${id}`,{method:'DELETE'});toast('Удалено','ok');await loadDevices();}
@@ -286,7 +345,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];haKettle=[];haNumber=[];haTV=[];haAP={power:[],controls:[],sensors:[]};
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];haKettle=[];haNumber=[];haDoor=[];haAir=[];haRadiator=[];haFan=[];haTV=[];haAP={power:[],controls:[],sensors:[]};haIntercom=[];haPir=[];haEventBtns=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -297,13 +356,14 @@ async function wizNext(){
   if(wStep<total){
     wStep++;
     // Загружаем список сущностей при переходе на шаг 2 (если ещё не загружены)
-    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);if(wType==='smoke')await Promise.all([fetchSmoke(),fetchSensors()]);if(wType==='kettle')await fetchKettle();if(wType==='tv')await fetchTV();if(wType==='air_purifier')await fetchAP();}
+    if(wStep===2){if(wType==='relay')await Promise.all([fetchRelay(),fetchSensors()]);if(wType==='sensor_temp')await fetchSensors();if(wType==='scenario_button')await fetchRelay();if(wType==='hvac_ac')await Promise.all([fetchClimate(),fetchSensors(),fetchSocket()]);if(wType==='vacuum_cleaner')await Promise.all([fetchVacuum(),fetchSensors()]);if(wType==='valve')await fetchValve();if(wType==='light')await fetchLight();if(wType==='cover')await Promise.all([fetchCover(),fetchSensors()]);if(wType==='water_leak')await Promise.all([fetchWaterLeak(),fetchSensors()]);if(wType==='humidifier')await Promise.all([fetchHumidifier(),fetchSensors()]);if(wType==='socket')await Promise.all([fetchSocket(),fetchSensors()]);if(wType==='smoke')await Promise.all([fetchSmoke(),fetchSensors()]);if(wType==='kettle')await Promise.all([fetchKettle(),fetchWaterSensors()]);if(wType==='sensor_door')await Promise.all([fetchDoor(),fetchSensors()]);if(wType==='sensor_air')await fetchSensors();if(wType==='hvac_radiator')await Promise.all([fetchRadiator(),fetchSensors()]);if(wType==='hvac_fan')await Promise.all([fetchFan(),fetchSensors()]);if(wType==='tv')await fetchTV();if(wType==='intercom')await fetchIntercom();if(wType==='sensor_pir')await fetchPir();if(wType==='automation_relay')await fetchRelay();if(wType==='script_relay')await fetchRelay();if(wType==='event_button')await Promise.all([fetchEventBtns(),fetchSensors()]);if(wType==='air_purifier')await fetchAP();}
     renderWiz();
+    setTimeout(()=>document.getElementById('wizContent')?.scrollIntoView({behavior:'smooth',block:'start'}),50);
   }else{
     await submitDevice();
   }
 }
-function wizBack(){if(wStep>1){wStep--;renderWiz();}}
+function wizBack(){if(wStep>1){wStep--;renderWiz();setTimeout(()=>document.getElementById('wizContent')?.scrollIntoView({behavior:'smooth',block:'start'}),50);}}
 
 async function wizValidate(){
   const total=(STEPS[wType]||['','','']).length;
@@ -333,6 +393,14 @@ async function wizValidate(){
     if(wType==='air_purifier'){const e=apValidate();if(e){toast(e,'err');return false;}}
     if(wType==='humidifier'&&!wData.entity_id){toast('Выберите увлажнитель','err');return false;}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
+    if(wType==='sensor_door'&&!wData.entity_id){toast('Выберите датчик открытия','err');return false;}
+    if(wType==='hvac_radiator'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
+    if(wType==='hvac_fan'&&!wData.entity_id){toast('Выберите вентилятор','err');return false;}
+    if(wType==='tv'&&!wData.entity_id){toast('Выберите телевизор','err');return false;}
+    if(wType==='intercom'&&!wData.entity_id){toast('Выберите домофон','err');return false;}
+    if(wType==='sensor_pir'&&!wData.entity_id){toast('Выберите датчик движения','err');return false;}
+    if(wType==='automation_relay'&&!wData.entity_id){toast('Выберите автоматизацию','err');return false;}
+    if(wType==='script_relay'&&!wData.entity_id){toast('Выберите скрипт','err');return false;}
   }
 
   if(isLast){
@@ -347,8 +415,8 @@ async function wizValidate(){
     }
     if(!id){toast('Введите ID','err');return false;}
     if(!/^[a-z0-9_]+$/.test(id)){toast('ID: только a-z, 0-9 и _','err');return false;}
-    if(devices.find(d=>d.id===id)){toast(`ID «${id}» уже занят`,'err');return false;}
-    wData.name=name;wData.id=id;wData.room=document.getElementById('dRoom')?.value?.trim()||'';
+    if(!wData._edit && devices.find(d=>d.id===id)){toast(`ID «${id}» уже занят`,'err');return false;}
+    wData.name=name;if(!wData._edit)wData.id=id;wData.room=document.getElementById('dRoom')?.value?.trim()||'';
   }
   return true;
 }
@@ -364,8 +432,9 @@ function renderWiz(){
   }).join('');
   const c=document.getElementById('wizContent');
   if(wStep===1)c.innerHTML=renderStep1();
-  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else if(wType==='smoke')c.innerHTML=renderStep2Smoke();else if(wType==='kettle')c.innerHTML=renderStep2Kettle();else if(wType==='tv')c.innerHTML=renderStep2TV();else if(wType==='air_purifier')c.innerHTML=renderStep2AirPurifier();else c.innerHTML=renderStep2Sensor();}
+  else if(wStep===2){if(wType==='relay')c.innerHTML=renderStep2Relay();else if(wType==='scenario_button')c.innerHTML=renderStep2ScenarioButton();else if(wType==='hvac_ac')c.innerHTML=renderStep2HvacAc();else if(wType==='vacuum_cleaner')c.innerHTML=renderStep2Vacuum();else if(wType==='valve')c.innerHTML=renderStep2Valve();else if(wType==='light')c.innerHTML=renderStep2Light();else if(wType==='cover')c.innerHTML=renderStep2Cover();else if(wType==='water_leak')c.innerHTML=renderStep2WaterLeak();else if(wType==='humidifier')c.innerHTML=renderStep2Humidifier();else if(wType==='socket')c.innerHTML=renderStep2Socket();else if(wType==='smoke')c.innerHTML=renderStep2Smoke();else if(wType==='kettle')c.innerHTML=renderStep2Kettle();else if(wType==='sensor_door')c.innerHTML=renderStep2SensorDoor();else if(wType==='sensor_air')c.innerHTML=renderStep2SensorAir();else if(wType==='hvac_radiator')c.innerHTML=renderStep2Radiator();else if(wType==='hvac_fan')c.innerHTML=renderStep2Fan();else if(wType==='tv')c.innerHTML=renderStep2TV();else if(wType==='intercom')c.innerHTML=renderStep2Intercom();else if(wType==='sensor_pir')c.innerHTML=renderStep2Pir();else if(wType==='automation_relay')c.innerHTML=renderStep2Automation();else if(wType==='script_relay')c.innerHTML=renderStep2Script();else if(wType==='event_button')c.innerHTML=renderStep2EventButton();else if(wType==='air_purifier')c.innerHTML=renderStep2AirPurifier();else c.innerHTML=renderStep2Sensor();}
   else c.innerHTML=renderStep3();
+  if(wStep===3){setTimeout(updateNameCount,0);setTimeout(loadTriggerChips,100);}
 }
 
 function renderStep1(){
@@ -382,21 +451,31 @@ function renderStep1(){
       {id:'vacuum_cleaner', icon:'🤖', name:'Пылесос',                 desc:'vacuum — управление уборкой'},
       {id:'valve',          icon:'🚰', name:'Кран',                    desc:'valve, switch — открытие и закрытие'},
       {id:'cover',          icon:'🔲', name:'Рулонные шторы / жалюзи', desc:'cover — открытие, закрытие, позиционирование'},
+      {id:'hvac_fan',       icon:'🌀', name:'Бризер / вентилятор',       desc:'fan, switch — вкл/выкл + скорость'},
+      {id:'hvac_radiator',  icon:'🌡️', name:'Термоголовка радиатора',     desc:'climate — вкл/выкл + целевая температура'},
+      {id:'tv',             icon:'📺', name:'Телевизор',                   desc:'media_player — вкл/выкл, громкость, каналы'},
+      {id:'intercom',       icon:'📞', name:'Домофон',                     desc:'switch/button/lock — открытие двери + датчик вызова'},
     ]},
     {label:'Датчики', items:[
       {id:'sensor_temp',    icon:'🌡️', name:'Датчик температуры/влажности', desc:'sensor — температура и влажность'},
+      {id:'sensor_door',    icon:'🚪', name:'Датчик открытия',              desc:'binary_sensor (door/window) — открыто/закрыто'},
+      {id:'sensor_air',     icon:'🍃', name:'Датчик качества воздуха',     desc:'sensor — CO2, PM2.5, TVOC, температура, влажность'},
       {id:'water_leak',     icon:'🌊', name:'Датчик протечки',              desc:'binary_sensor (moisture) — обнаружение воды'},
       {id:'smoke',          icon:'🔥', name:'Датчик дыма',                  desc:'binary_sensor (smoke) — обнаружение дыма'},
+      {id:'sensor_pir',     icon:'🏃', name:'Датчик движения',             desc:'binary_sensor (motion) — обнаружение движения'},
     ]},
     {label:'Автоматизации', items:[
       {id:'scenario_button',icon:'🔔', name:'Сценарная кнопка', desc:'Прокидывает события из HA в Салют: вкл → click, выкл → double_click'},
+      {id:'automation_relay',icon:'⚡', name:'Автоматизация',   desc:'automation — запуск автоматизации HA по команде из Салюта'},
+      {id:'script_relay',     icon:'📜', name:'Сценарий / скрипт', desc:'script — запуск скрипта HA по команде из Салюта'},
+      {id:'event_button',    icon:'🔘', name:'Кнопка событий',   desc:'HA event → button_event в Сбер (click/double_click)'},
     ]},
   ];
   return groups.map(g=>`
     <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:14px 0 6px;padding-left:2px">${g.label}</div>
-    ${g.items.map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
-      <div class="type-icon">${t.icon}</div>
-      <div><div class="type-name">${t.name}</div><div class="type-desc">${t.desc}</div></div></div>`).join('')}
+    <div class="type-grid">${g.items.map(t=>`<div class="type-card ${wType===t.id?'sel':''}" onclick="pickType('${t.id}')">
+      <div class="type-icon" style="font-size:22px">${t.icon}</div>
+      <div style="min-width:0"><div class="type-name" style="font-size:12px;margin-bottom:2px">${t.name}</div><div class="type-desc" style="font-size:10px">${t.desc}</div></div></div>`).join('')}</div>
   `).join('');
 }
 function pickType(t){wType=t;renderWiz();}
@@ -443,7 +522,7 @@ function pickRelaySensor(eid,name){
 function clearRelaySensor(key){delete wData[key];document.getElementById('wizContent').innerHTML=renderStep2Relay();}
 
 function relayItems(){
-  const list=haRelay.filter(e=>!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase()));
+  const list=haRelay.filter(e=>e.domain!=='automation'&&e.domain!=='script'&&(!sFilter||(e.area+e.domain+e.entity_id+e.friendly_name).toLowerCase().includes(sFilter.toLowerCase())));
   if(!list.length)return`<div class="p-empty">Ничего не найдено</div>`;
   return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''} ${usedCls(e.entity_id)}" onclick="pickEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area)}','${esc(e.device_id||'')}')">
     <span class="dom-badge">${esc(e.domain)}</span><span class="p-area">${esc(e.area||'—')}</span>
@@ -614,10 +693,12 @@ function renderStep2Sensor(){
 function openSP(key){spField=key;document.getElementById('spWrap').style.display='';document.getElementById('spInput').value='';renderSPList('');document.getElementById('spWrap').scrollIntoView({behavior:'smooth'});}
 function renderSPList(q){
   q=(q||'').toLowerCase();
-  const clsMap={temperature_entity:'temperature',battery_entity:'battery'};
+  const clsMap={temperature_entity:'temperature',battery_entity:'battery',co2_entity:'carbon_dioxide',pm25_entity:'pm25',tvoc_entity:'volatile_organic_compounds',signal_entity:'signal_strength'};
   let list=spField==='humidity_entity'
     ? haSensors.filter(s=>s.device_class==='humidity'||s.device_class==='moisture')
     : (clsMap[spField]?haSensors.filter(s=>s.device_class===clsMap[spField]):haSensors);
+  // Если фильтр ничего не дал — показываем все (template-сенсоры и т.п.)
+  if(!list.length) list=haSensors;
   if(q)list=list.filter(s=>(s.area+s.device_class+s.entity_id+s.friendly_name).toLowerCase().includes(q));
   const el=document.getElementById('spList');if(!el)return;
   el.innerHTML=list.length?list.map(s=>`<div class="p-item ${wData[spField]===s.entity_id?'sel':''} ${usedCls(s.entity_id)}" onclick="pickSensor('${esc(s.entity_id)}','${esc(s.friendly_name)}','${esc(s.area)}')">
@@ -647,18 +728,39 @@ function clearSP(key){delete wData[key];delete wData[key+'_name'];delete wData[k
 // ═══════════════════════════════════════════════════════════
 function renderStep3(){
   let defName='',defRoom='';
-  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'||wType==='smoke'||wType==='kettle'||wType==='tv'||wType==='air_purifier'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
+  if(wType==='relay'||wType==='socket'||wType==='scenario_button'||wType==='hvac_ac'||wType==='vacuum_cleaner'||wType==='valve'||wType==='light'||wType==='cover'||wType==='water_leak'||wType==='humidifier'||wType==='smoke'||wType==='kettle'||wType==='sensor_door'||wType==='hvac_radiator'||wType==='hvac_fan'||wType==='tv'||wType==='intercom'||wType==='sensor_pir'||wType==='automation_relay'||wType==='script_relay'||wType==='air_purifier'){defName=wData.entity_name||'';defRoom=wData.entity_area||'';}
   else{defName=wData.temperature_entity_name||wData.humidity_entity_name||'';defRoom=wData.temperature_entity_area||wData.humidity_entity_area||'';}
   return `<div class="fg"><label>Имя <span style="color:var(--danger)">*</span></label>
-    <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId()" placeholder="Свет в гостиной"/>
-    <div style="font-size:11px;color:var(--text-muted,#888);margin-top:4px">Только русские буквы, цифры и пробелы · от 3 до 33 символов</div></div>
+    <input type="text" id="dName" value="${esc(wData.name||defName)}" oninput="autoId();updateNameCount()" placeholder="Свет в гостиной"/>
+    <div style="font-size:11px;color:var(--text-muted,#888);margin-top:4px">Только русские буквы, цифры и пробелы · от 3 до 33 символов · <span id="nameCount">0/33</span></div></div>
     <div class="fg"><label>ID <span style="color:var(--danger)">*</span></label>
     <input type="text" id="dId" value="${esc(wData.id||slugify(wData.name||defName))}" placeholder="relay_living_room"/>
     <div class="hint">Только a–z, 0–9, _ . Уникальный идентификатор в Сбере.</div></div>
     <div class="fg"><label>Комната</label>
-    <input type="text" id="dRoom" value="${esc(wData.room!==undefined?wData.room:defRoom)}" placeholder="Гостиная"/></div>`;
+    <input type="text" id="dRoom" value="${esc(wData.room!==undefined?wData.room:defRoom)}" placeholder="Гостиная" oninput="autoId()"/>
+    <div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px">${[...new Set(devices.map(d=>d.room).filter(Boolean))].sort().map(r=>`<span class="room-chip" onclick="document.getElementById('dRoom').value='${esc(r)}';autoId()" style="cursor:pointer;background:var(--primary-lt);color:var(--primary-dk);padding:2px 8px;border-radius:12px;font-size:11px;white-space:nowrap">${esc(r)}</span>`).join('')}</div></div>
+    ${(wType==='automation_relay'||(wType==='relay'&&wData.entity_id&&wData.entity_id.startsWith('automation.')))?`<div class="fg"><label>ID триггера (опционально)</label><input type="text" id="triggerIdInput" value="${esc(wData.trigger_id||'')}" oninput="wData.trigger_id=this.value;autoId()" placeholder="manual_trigger_id"/><div class="hint">Для автоматизаций с несколькими триггерами</div><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:6px" id="triggerChips"></div></div>`:''}
+    ${wType==='event_button'?renderEventButtonStep3():''}`;
 }
-function autoId(){const n=document.getElementById('dName')?.value||'';const f=document.getElementById('dId');if(f&&(!wData.id||f.value===slugify(wData.name||'')))f.value=slugify(n);}
+function autoId(){if(wData._edit)return;const n=document.getElementById('dName')?.value||'';const f=document.getElementById('dId');const r=document.getElementById('dRoom')?.value||'';if(f&&(!wData.id||f.value===slugify(wData.name||''))){var id=slugify(n);if(r)id+='_'+slugify(r);if(wType==='automation_relay'&&wData.trigger_id)id+='_'+slugify(wData.trigger_id);f.value=id;}}
+
+async function loadTriggerChips(){
+  const c=document.getElementById('triggerChips');if(!c)return;
+  const eid=wData.entity_id;if(!eid)return;
+  try{
+    const r1=await api('/api/sber_mqtt/ha_entities/automation_triggers?entity_id='+encodeURIComponent(eid));
+    if(r1.automation_id){
+      const r2=await api('/api/config/automation/config/'+r1.automation_id);
+      const ids=(r2.triggers||[]).map(t=>t.id).filter(Boolean);
+      c.innerHTML=ids.map(t=>{
+        const used=devices.some(d=>d.attributes&&d.attributes.entity_id===eid&&d.attributes.trigger_id===t);
+        const bg=used?'var(--primary-lt)':'var(--bg)';
+        const clr=used?'var(--primary-dk)':'var(--muted)';
+        const brd=used?'':'border:1px solid var(--border)';
+        return'<span class="room-chip" onclick="var inp=document.getElementById(\'triggerIdInput\');if(inp){inp.value=\''+esc(t)+'\';wData.trigger_id=\''+esc(t)+'\';autoId();}" style="cursor:pointer;background:'+bg+';color:'+clr+';padding:2px 8px;border-radius:12px;font-size:11px;white-space:nowrap;'+brd+'">'+esc(t)+'</span>';
+      }).join('');
+    }
+  }catch(e){}}function updateNameCount(){const i=document.getElementById('dName');const c=document.getElementById('nameCount');if(i&&c){const len=(i.value||'').length;c.textContent=len+'/33';c.style.color=len>33?'var(--danger)':'';}}
 
 async function submitDevice(){
   const attrs={};
@@ -672,6 +774,13 @@ async function submitDevice(){
   else if(wType==='hvac_ac'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
     if(wData.temperature_entity)attrs.temperature_entity=wData.temperature_entity;
+    if(wData.hvac_modes)attrs.hvac_modes=wData.hvac_modes;
+    if(wData.fan_modes)attrs.fan_modes=wData.fan_modes;
+    if(wData.preset_modes)attrs.preset_modes=wData.preset_modes;
+    if(wData.swing_modes)attrs.swing_modes=wData.swing_modes;
+    if(wData.min_temp!==undefined)attrs.min_temp=wData.min_temp;
+    if(wData.max_temp!==undefined)attrs.max_temp=wData.max_temp;
+    if(wData.target_temp_step!==undefined)attrs.target_temp_step=wData.target_temp_step;
   }
   else if(wType==='vacuum_cleaner'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
@@ -695,6 +804,8 @@ async function submitDevice(){
   }
   else if(wType==='kettle'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.water_entity) attrs.water_entity=wData.water_entity;
+    if(wData.water_low_entity) attrs.water_low_entity=wData.water_low_entity;
     if(wData.off_mode) attrs.off_mode=wData.off_mode;
     if(wData.boil_mode)attrs.boil_mode=wData.boil_mode;
     if(wData.heat_mode)attrs.heat_mode=wData.heat_mode;
@@ -728,18 +839,47 @@ async function submitDevice(){
   }
   else if(wType==='light'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
-    // Сохраняем выбранные фичи как булевые флаги
     for(const f of ['light_brightness','light_colour','light_colour_temp','light_mode']){
       attrs[f]=!!(wData.light_features&&wData.light_features.includes(f));
     }
   }
+  else if(wType==='sensor_door'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.battery_entity)attrs.battery_entity=wData.battery_entity;
+    if(wData.tamper_entity) attrs.tamper_entity=wData.tamper_entity;
+  }
+  else if(wType==='hvac_radiator'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.temperature_entity)attrs.temperature_entity=wData.temperature_entity;
+  }
+  else if(wType==='hvac_fan'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+  }
+  else if(wType==='tv'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+  }
+  else if(wType==='intercom'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.incoming_call_entity) attrs.incoming_call_entity=wData.incoming_call_entity;
+  }
+  else if(wType==='sensor_pir'){
+    attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    if(wData.battery_entity) attrs.battery_entity=wData.battery_entity;
+  }
+  else if(wType==='automation_relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';if(wData.trigger_id)attrs.trigger_id=wData.trigger_id;}
+  else if(wType==='script_relay'){attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';}
+  else if(wType==='event_button'){attrs.event_type=wData.event_type||'';attrs.action_map=wData.action_map||{};}
+  else if(wType==='sensor_air'){['temperature_entity','humidity_entity','co2_entity','pm25_entity','tvoc_entity','battery_entity','signal_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
   else{['temperature_entity','humidity_entity','battery_entity'].forEach(k=>{if(wData[k])attrs[k]=wData[k];});}
-  const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:wType,attributes:attrs};
+  const body={id:wData.id,name:wData.name,room:wData.room||'',device_type:(wType==='automation_relay'||wType==='script_relay')?'relay':wType,attributes:attrs};
   const btn=document.getElementById('btnNext');btn.disabled=true;btn.innerHTML='<div class="spin"></div>';
   try{
-    const res = await api('/api/sber_mqtt/devices',{method:'POST',body:JSON.stringify(body)});
+    const exists=wData._edit || devices.some(d=>d.id===wData.id);
+    const method=exists?'PUT':'POST';
+    const url=exists?`/api/sber_mqtt/devices/${wData.id}`:'/api/sber_mqtt/devices';
+    const res = await api(url,{method,body:JSON.stringify(body)});
     closeWizard();
-    toast('Устройство добавлено','ok');
+    toast(exists?'Устройство обновлено':'Устройство добавлено','ok');
     await loadDevices();
     // Применяем last_state из ответа — он уже содержит начальное состояние
     if(res.device?.last_state && Object.keys(res.device.last_state).length){
@@ -762,7 +902,7 @@ async function submitDevice(){
 }
 
 async function fetchRelay(){if(haRelay.length)return;try{haRelay=(await api('/api/sber_mqtt/ha_entities/relay')).entities||[];}catch(e){toast('Ошибка загрузки сущностей','err');}}
-async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,moisture,battery,signal_strength,power,current,voltage')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
+async function fetchSensors(){if(haSensors.length)return;try{haSensors=(await api('/api/sber_mqtt/ha_entities/sensors?classes=temperature,humidity,moisture,battery,signal_strength,power,current,voltage,carbon_dioxide,pm25,volatile_organic_compounds')).entities||[];}catch(e){toast('Ошибка загрузки сенсоров','err');}}
 
 let haClimate=[];
 
@@ -814,7 +954,20 @@ function hvacItems(){
     <span class="dom-badge">climate</span><span class="p-area">${esc(e.area||'—')}</span>
     <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
-function pickHvacEntity(eid,name,area){wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;document.getElementById('wizContent').innerHTML=renderStep2HvacAc();}
+function pickHvacEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  var ce=haClimate.find(function(x){return x.entity_id===eid;});
+  if(ce){
+    wData.hvac_modes=ce.hvac_modes||[];
+    wData.fan_modes=ce.fan_modes||[];
+    wData.preset_modes=ce.preset_modes||[];
+    wData.swing_modes=ce.swing_modes||[];
+    wData.min_temp=ce.min_temp;
+    wData.max_temp=ce.max_temp;
+    wData.target_temp_step=ce.target_temp_step;
+  }
+  document.getElementById('wizContent').innerHTML=renderStep2HvacAc();
+}
 function openHvacTempPicker(){const el=document.getElementById('hvacTempPicker');el.style.display='';document.getElementById('hvacTempInput').value='';renderHvacTempList('');el.scrollIntoView({behavior:'smooth'});}
 function renderHvacTempList(q){
   q=(q||'').toLowerCase();
@@ -1463,7 +1616,7 @@ window.addEventListener('load', init);
 // WIZARD: ЧАЙНИК
 // ═══════════════════════════════════════════════════════════
 
-let haKettle=[], haNumber=[];
+let haKettle=[], haNumber=[], haDoor=[], haAir=[], haRadiator=[], haFan=[], haWaterSensors=[], haIntercom=[], haPir=[], haEventBtns=[];
 
 async function fetchKettle(){
   if(haKettle.length)return;
@@ -1475,6 +1628,18 @@ async function fetchNumber(){
   if(haNumber.length)return;
   try{haNumber=(await api('/api/sber_mqtt/ha_entities/number')).entities||[];}
   catch(e){toast('Ошибка загрузки number-сущностей','err');}
+}
+
+async function fetchWaterSensors(){
+  if(haWaterSensors.length)return;
+  try{haWaterSensors=(await api('/api/sber_mqtt/ha_entities/water_sensors')).entities||[];}
+  catch(e){toast('Ошибка загрузки сенсоров','err');}
+}
+
+async function fetchEventBtns(){
+  if(haEventBtns.length)return;
+  try{haEventBtns=(await api('/api/sber_mqtt/ha_entities/event_buttons')).entities||[];}
+  catch(e){toast('Ошибка загрузки кнопок','err');}
 }
 
 function renderStep2Kettle(){
@@ -1494,7 +1659,27 @@ function renderStep2Kettle(){
     ${sel?renderKettleModes(selEntity):''}
     <div style="margin-top:12px;font-size:11px;color:var(--muted)">
       Текущая и целевая температура воды подтягиваются автоматически из атрибутов сущности.
-    </div>`;
+    </div>
+    ${sel?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border,#e0e0e0)">
+      <div class="sf"><label>💧 Уровень воды (опционально)</label>
+        <button class="sf-btn ${wData.water_entity?'filled':''}" onclick="openKettleWater()">
+          <span>${wData.water_entity?(wData.water_entity_name||wData.water_entity):'Выбрать сенсор…'}</span><span>${wData.water_entity?'✓':'▾'}</span></button>
+        ${wData.water_entity?`<div class="sf-sub">${esc(wData.water_entity)} <button class="sf-clr" onclick="delete wData.water_entity;delete wData.water_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Kettle()">✕</button></div>`:''}
+      </div>
+      <div class="sf"><label>🔴 Мало воды (опционально)</label>
+        <button class="sf-btn ${wData.water_low_entity?'filled':''}" onclick="openKettleWaterLow()">
+          <span>${wData.water_low_entity?(wData.water_low_entity_name||wData.water_low_entity):'Выбрать binary_sensor…'}</span><span>${wData.water_low_entity?'✓':'▾'}</span></button>
+        ${wData.water_low_entity?`<div class="sf-sub">${esc(wData.water_low_entity)} <button class="sf-clr" onclick="delete wData.water_low_entity;delete wData.water_low_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Kettle()">✕</button></div>`:''}
+      </div>
+      <div id="kettleWaterPicker" style="display:none;margin-top:6px">
+        <div class="picker">
+          <div class="psearch"><span style="color:var(--muted)">🔍</span>
+            <input type="text" placeholder="Поиск…" oninput="renderKettleWaterList(this.value)"/></div>
+          <div class="p-list" style="max-height:140px" id="kettleWaterList"></div></div></div>
+      <div id="kettleWaterLowPicker" style="display:none;margin-top:6px">
+        <div class="picker">
+          <div class="p-list" style="max-height:140px" id="kettleWaterLowList"></div></div></div>
+    </div>`:''}`;
 }
 
 function kettleItems(){
@@ -1575,13 +1760,232 @@ function pickKettleEntity(eid,name,area){
   document.getElementById('wizContent').innerHTML=renderStep2Kettle();
 }
 
+function openKettleWater(){
+  const el=document.getElementById('kettleWaterPicker');
+  el.style.display=el.style.display==='none'?'':'none';
+  renderKettleWaterList('');
+}
+function renderKettleWaterList(q){
+  q=(q||'').toLowerCase();
+  const list=haWaterSensors.filter(s=>!q||(s.entity_id+s.friendly_name+s.device_class).toLowerCase().includes(q));
+  const el=document.getElementById('kettleWaterList');if(!el)return;
+  el.innerHTML=list.length
+    ?list.map(s=>`<div class="p-item ${wData.water_entity===s.entity_id?'sel':''}" onclick="pickKettleWater('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+      <span class="dom-badge">${esc(s.device_class||'—')}</span><span class="p-area">${esc(s.area||'—')}</span>
+      <span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join('')
+    :'<div class="p-empty">Нет сенсоров</div>';
+}
+function pickKettleWater(eid,name){
+  wData.water_entity=eid;wData.water_entity_name=name;
+  document.getElementById('kettleWaterPicker').style.display='none';
+  document.getElementById('wizContent').innerHTML=renderStep2Kettle();
+}
+function openKettleWaterLow(){
+  // Используем haSensors с device_class moisture или все binary_sensor
+  const list=haWaterSensors.filter(s=>s.domain==='binary_sensor'||s.device_class==='moisture');
+  const el=document.getElementById('kettleWaterLowList');
+  const wrap=document.getElementById('kettleWaterLowPicker');
+  if(!el){wrap.style.display='none';return;}
+  wrap.style.display=wrap.style.display==='none'?'':'none';
+  el.innerHTML=list.length
+    ?list.map(s=>`<div class="p-item ${wData.water_low_entity===s.entity_id?'sel':''}" onclick="pickKettleWaterLow('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+      <span class="dom-badge">${esc(s.device_class||'—')}</span><span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join('')
+    :'<div class="p-empty">Нет binary_sensor</div>';
+}
+function pickKettleWaterLow(eid,name){
+  wData.water_low_entity=eid;wData.water_low_entity_name=name;
+  document.getElementById('kettleWaterLowPicker').style.display='none';
+  document.getElementById('wizContent').innerHTML=renderStep2Kettle();
+}
 
 
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ДАТЧИК ОТКРЫТИЯ (sensor_door)
+// ═══════════════════════════════════════════════════════════
+
+async function fetchDoor(){
+  if(haDoor.length)return;
+  try{haDoor=(await api('/api/sber_mqtt/ha_entities/sensor_door')).entities||[];}catch(e){}
+}
+
+function renderStep2SensorDoor(){
+  if(!haDoor.length)return renderLoading();
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите датчик открытия:</label></div>
+    <div class="picker" id="doorItems"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+      <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+        oninput="sFilter=this.value;document.getElementById('doorItems').querySelector('.plist').innerHTML=doorItems()"/></div>
+      <div class="plist">${doorItems()}</div></div>`;
+}
+function doorItems(){
+  const q=(sFilter||'').toLowerCase();
+  const list=haDoor.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickDoorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickDoorEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  // Автоподбор battery
+  if(!wData.battery_entity){const bat=haSensors.find(s=>s.device_class==='battery'&&s.entity_id.includes(eid.split('.')[1]));if(bat){wData.battery_entity=bat.entity_id;wData.battery_entity_name=bat.friendly_name;}}
+  document.getElementById('wizContent').innerHTML=renderStep2SensorDoor();
+}
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ДАТЧИК КАЧЕСТВА ВОЗДУХА (sensor_air)
+// ═══════════════════════════════════════════════════════════
+
+function renderStep2SensorAir(){
+  if(!haSensors.length)return'<div class="p-empty">Сенсоры не загружены. Перезагрузите HA и страницу.</div>';
+  const slots=[{k:'temperature_entity',l:'🌡️ Температура',c:'temperature'},
+              {k:'humidity_entity',l:'💧 Влажность',c:'humidity'},
+              {k:'co2_entity',l:'🫧 CO₂',c:'carbon_dioxide'},
+              {k:'pm25_entity',l:'🔴 PM2.5',c:'pm25'},
+              {k:'tvoc_entity',l:'🧪 TVOC',c:'volatile_organic_compounds'},
+              {k:'battery_entity',l:'🔋 Заряд батареи',c:'battery'},
+              {k:'signal_entity',l:'📶 Сила сигнала',c:'signal_strength'}];
+  const html=slots.map(f=>{
+    const val=wData[f.k];const entity=val?haSensors.find(x=>x.entity_id===val):null;
+    return `<div class="sf"><label>${f.l}</label>
+      <button class="sf-btn ${val?'filled':''}" onclick="openSP('${f.k}')">
+        <span>${val?(entity?.friendly_name||val):'Выбрать сенсор…'}</span><span>${val?'✓':'▾'}</span></button>
+      ${val?`<div class="sf-sub">${esc(val)} <button class="sf-clr" onclick="clearSP('${f.k}')">✕</button></div>`:''}</div>`;
+  }).join('');
+  return `<div style="margin-bottom:12px;font-size:12px;color:var(--muted)">Все поля опциональны.</div>
+    <div class="sg">${html}</div>
+    <div id="spWrap" class="sp-wrap" style="display:none">
+      <div class="picker">
+        <div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="spInput" type="text" placeholder="Поиск…" oninput="renderSPList(this.value)"/>
+          <button class="clr" onclick="spInput.value='';renderSPList('')">✕</button></div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" id="spList"></div></div></div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ТЕРМОГОЛОВКА (hvac_radiator)
+// ═══════════════════════════════════════════════════════════
+
+async function fetchRadiator(){
+  if(haRadiator.length)return;
+  try{haRadiator=(await api('/api/sber_mqtt/ha_entities/hvac_radiator')).entities||[];}catch(e){}
+}
+
+function renderStep2Radiator(){
+  if(!haRadiator.length)return renderLoading();
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите климатическую сущность:</label></div>
+    <div class="picker" id="radItems"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+      <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+        oninput="sFilter=this.value;document.getElementById('radItems').querySelector('.plist').innerHTML=radiatorItems()"/></div>
+      <div class="plist">${radiatorItems()}</div></div>`;
+}
+function radiatorItems(){
+  const q=(sFilter||'').toLowerCase();
+  const list=haRadiator.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickRadiatorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickRadiatorEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Radiator();
+}
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: БРИЗЕР (hvac_fan)
+// ═══════════════════════════════════════════════════════════
+
+async function fetchFan(){
+  if(haFan.length)return;
+  try{haFan=(await api('/api/sber_mqtt/ha_entities/hvac_fan')).entities||[];}catch(e){}
+}
+
+function renderStep2Fan(){
+  if(!haFan.length)return renderLoading();
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите вентилятор:</label></div>
+    <div class="picker" id="fanItems"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+      <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+        oninput="sFilter=this.value;document.getElementById('fanItems').querySelector('.plist').innerHTML=fanItems()"/></div>
+      <div class="plist">${fanItems()}</div></div>`;
+}
+function fanItems(){
+  const q=(sFilter||'').toLowerCase();
+  const list=haFan.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickFanEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickFanEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Fan();
+}
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ДОМОФОН (intercom)
+// ═══════════════════════════════════════════════════════════
+
+async function fetchIntercom(){
+  if(haIntercom.length)return;
+  try{haIntercom=(await api('/api/sber_mqtt/ha_entities/intercom')).entities||[];}catch(e){}
+}
+
+function renderStep2Intercom(){
+  if(!haIntercom.length)return renderLoading();
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите кнопку открытия двери:</label></div>
+    <div class="picker" id="intercomItems"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+      <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+        oninput="sFilter=this.value;document.getElementById('intercomItems').querySelector('.plist').innerHTML=intercomItems()"/></div>
+      <div class="plist">${intercomItems()}</div></div>
+    ${wData.entity_id?`<div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border,#e0e0e0)">
+      ${(()=>{const val=wData.incoming_call_entity;const e=val?haSensors.find(x=>x.entity_id===val):null;
+        return `<div class="sf"><label>📞 Датчик вызова (опционально)</label>
+          <button class="sf-btn ${val?'filled':''}" onclick="openSP('incoming_call_entity')">
+            <span>${val?(e?.friendly_name||val):'Выбрать binary_sensor…'}</span><span>${val?'✓':'▾'}</span></button>
+          ${val?`<div class="sf-sub">${esc(val)} <button class="sf-clr" onclick="delete wData.incoming_call_entity;delete wData.incoming_call_entity_name;document.getElementById('wizContent').innerHTML=renderStep2Intercom()">✕</button></div>`:''}</div>`;
+      })()}
+      <div id="spWrap" class="sp-wrap" style="display:none">
+        <div class="picker"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+          <input id="spInput" type="text" placeholder="Поиск…" oninput="renderSPList(this.value)"/>
+          <button class="clr" onclick="spInput.value='';renderSPList('')">✕</button></div>
+        <div class="p-head"><div>Класс</div><div>Комната</div><div>Имя</div><div>Entity ID</div></div>
+        <div class="p-list" id="spList"></div></div></div>
+    </div>`:''}`;
+}
+function intercomItems(){
+  const q=(sFilter||'').toLowerCase();
+  const list=haIntercom.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickIntercomEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickIntercomEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Intercom();
+}
 
 
+// ═══════════════════════════════════════════════════════════
+// WIZARD: ДАТЧИК ДВИЖЕНИЯ (sensor_pir)
+// ═══════════════════════════════════════════════════════════
 
+async function fetchPir(){
+  if(haPir.length)return;
+  try{haPir=(await api('/api/sber_mqtt/ha_entities/sensor_pir')).entities||[];}catch(e){}
+}
 
-
+function renderStep2Pir(){
+  return `<div class="fg" style="margin-bottom:10px"><label>Выберите датчик движения:</label></div>
+    <div class="picker"><div class="psearch"><span style="color:var(--muted)">🔍</span>
+      <input type="text" placeholder="Поиск…" value="${esc(sFilter)}"
+        oninput="sFilter=this.value;document.getElementById('pirlist').innerHTML=pirItems()"/></div>
+      <div class="plist" id="pirlist">${pirItems()}</div></div>`;
+}
+function pirItems(){
+  const q=(sFilter||'').toLowerCase();
+  const list=haPir.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
+  if(!list.length)return'<div class="p-empty">Датчики не найдены</div>';
+  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickPirEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+}
+function pickPirEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Pir();
+}
 
 
 // ═══════════════════════════════════════════════════════════
@@ -1635,6 +2039,72 @@ function pickTVEntity(eid){
 
 
 // ═══════════════════════════════════════════════════════════
+// WIZARD: АВТОМАТИЗАЦИЯ (показывается как relay)
+// ═══════════════════════════════════════════════════════════
+
+function renderStep2Automation(){
+  const automations=haRelay.filter(e=>e.domain==='automation');
+  if(!automations.length)return'<div class="p-empty">Нет automation сущностей</div>';
+  return '<div class="fg" style="margin-bottom:10px"><label>Выберите автоматизацию:</label></div><div class="picker"><div class="psearch"><span style="color:var(--muted)">🔍</span><input type="text" placeholder="Поиск…" value="'+esc(sFilter)+'" oninput="sFilter=this.value;document.getElementById(\'autolist\').innerHTML=autoItems()"/></div><div class="p-head" style="grid-template-columns:250px minmax(100px,150px) 1fr"><div>Имя</div><div>Добавлено</div><div>Entity ID</div></div><div class="plist" id="autolist">'+autoItems()+'</div></div>';
+}
+function autoItems(){
+  var q=(sFilter||'').toLowerCase();
+  var list=haRelay.filter(function(e){return e.domain==='automation'&&(e.friendly_name||'').toLowerCase().indexOf(q)>=0;});
+  return list.map(function(e){return'<div class="p-item '+(wData.entity_id===e.entity_id?'sel':'')+' '+usedCls(e.entity_id)+'" onclick="pickAutoEntity(\''+esc(e.entity_id)+'\',\''+esc(e.friendly_name)+'\',\''+esc(e.area||'')+'\')" style="grid-template-columns:250px minmax(100px,150px) 1fr"><span class="p-name">'+esc(e.friendly_name)+'</span><span style="display:flex;flex-direction:column;gap:2px;align-items:flex-start">'+autoBadge(e.entity_id)+'</span><span class="p-eid" title="'+esc(e.entity_id)+'">'+esc(e.entity_id)+'</span></div>';}).join('');
+}
+function pickAutoEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Automation();
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: СЦЕНАРИЙ / СКРИПТ (script → relay)
+// ═══════════════════════════════════════════════════════════
+
+function renderStep2Script(){
+  var scripts=haRelay.filter(function(e){return e.domain==='script';});
+  if(!scripts.length)return'<div class="p-empty">Нет script сущностей</div>';
+  return '<div class="fg" style="margin-bottom:10px"><label>Выберите скрипт:</label></div><div class="picker"><div class="psearch"><span style="color:var(--muted)">🔍</span><input type="text" placeholder="Поиск…" value="'+esc(sFilter)+'" oninput="sFilter=this.value;document.getElementById(\'scriptlist\').innerHTML=scriptItems()"/></div><div class="p-head" style="grid-template-columns:1fr 1fr"><div>Имя</div><div>Entity ID</div></div><div class="plist" id="scriptlist">'+scriptItems()+'</div></div>';
+}
+function scriptItems(){
+  var q=(sFilter||'').toLowerCase();
+  var list=haRelay.filter(function(e){return e.domain==='script'&&(e.friendly_name||'').toLowerCase().indexOf(q)>=0;});
+  return list.map(function(e){return'<div class="p-item '+(wData.entity_id===e.entity_id?'sel':'')+' '+usedCls(e.entity_id)+'" onclick="pickScriptEntity(\''+esc(e.entity_id)+'\',\''+esc(e.friendly_name)+'\',\''+esc(e.area||'')+'\')" style="grid-template-columns:1fr 1fr"><span class="p-name">'+esc(e.friendly_name)+usedBadge(e.entity_id)+'</span><span class="p-eid" title="'+esc(e.entity_id)+'">'+esc(e.entity_id)+'</span></div>';}).join('');
+}
+function pickScriptEntity(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  document.getElementById('wizContent').innerHTML=renderStep2Script();
+}
+
+
+// ═══════════════════════════════════════════════════════════
+// WIZARD: КНОПКА СОБЫТИЙ (event → button_event)
+// ═══════════════════════════════════════════════════════════
+
+function renderStep2EventButton(){
+  if(!haEventBtns.length)return renderLoading();
+  return '<div class="fg" style="margin-bottom:10px"><label>Выберите кнопку:</label></div><div class="picker"><div class="psearch"><span style="color:var(--muted)">🔍</span><input type="text" placeholder="Поиск…" value="'+esc(sFilter)+'" oninput="sFilter=this.value;document.getElementById(\'eventbtnlist\').innerHTML=eventBtnItems()"/></div><div class="plist" id="eventbtnlist">'+eventBtnItems()+'</div></div>';
+}
+function eventBtnItems(){
+  var q=(sFilter||'').toLowerCase();
+  var list=haEventBtns.filter(function(e){return(e.friendly_name||'').toLowerCase().indexOf(q)>=0||e.entity_id.indexOf(q)>=0;});
+  return list.map(function(e){return'<div class="p-item '+(wData.entity_id===e.entity_id?'sel':'')+'" onclick="pickEventBtn(\''+esc(e.entity_id)+'\',\''+esc(e.friendly_name)+'\',\''+esc(e.area||'')+'\')"><span class="dom-badge">'+esc(e.domain)+'</span><span class="p-name">'+esc(e.friendly_name)+'</span><span class="p-eid">'+esc(e.entity_id)+'</span></div>';}).join('');
+}
+function pickEventBtn(eid,name,area){
+  wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  if(!wData.event_type)wData.event_type=eid.split('.')[1]+'_action';
+  document.getElementById('wizContent').innerHTML=renderStep2EventButton();
+}
+
+function renderEventButtonStep3(){
+  var am=wData.action_map||{};
+  return '<div class="fg"><label>Тип события HA</label><input type="text" value="'+esc(wData.event_type||'')+'" oninput="wData.event_type=this.value"/><div class="hint">Обычно: имя_кнопки_action</div></div>'+
+    '<div class="fg"><label>Маппинг action → button_event</label><div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px"><div style="font-size:10px;color:var(--muted)">action в HA</div><div style="font-size:10px;color:var(--muted)">button_event в Сбер</div></div>'+
+    ['single','double','triple','long'].map(function(a){
+      return '<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:4px"><span style="font-size:12px">'+a+'</span><select onchange="var m=wData.action_map||{};wData.action_map=m;m[\''+a+'\']=this.value||undefined" style="font-size:12px"><option value="">—</option><option value="click"'+((am[a]||'')==='click'?' selected':'')+'>click</option><option value="double_click"'+((am[a]||'')==='double_click'?' selected':'')+'>double_click</option><option value="long_press"'+((am[a]||'')==='long_press'?' selected':'')+'>single + long</option></select></div>';
+    }).join('')+'</div>';
+}
 // WIZARD: ОЧИСТИТЕЛЬ ВОЗДУХА
 // ═══════════════════════════════════════════════════════════
 // В HA очиститель — набор отдельных сущностей (switch, select, sensor).

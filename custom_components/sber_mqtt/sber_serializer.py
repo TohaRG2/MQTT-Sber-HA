@@ -72,7 +72,14 @@ from .const import (
     DEVICE_TYPE_SOCKET,
     DEVICE_TYPE_SMOKE,
     DEVICE_TYPE_KETTLE,
+    DEVICE_TYPE_SENSOR_DOOR,
+    DEVICE_TYPE_SENSOR_AIR,
+    DEVICE_TYPE_HVAC_RADIATOR,
+    DEVICE_TYPE_HVAC_FAN,
     DEVICE_TYPE_TV,
+    DEVICE_TYPE_INTERCOM,
+    DEVICE_TYPE_SENSOR_PIR,
+    DEVICE_TYPE_EVENT_BUTTON,
     DEVICE_TYPE_AIR_PURIFIER,
     HA_HVAC_MODE_TO_SBER,
     HA_MODE_TO_SBER_AIR_FLOW,
@@ -158,8 +165,22 @@ class SberSerializer:
             return self._smoke_config(device_id, device)
         if device_type == DEVICE_TYPE_KETTLE:
             return self._kettle_config(device_id, device)
+        if device_type == DEVICE_TYPE_SENSOR_DOOR:
+            return self._sensor_door_config(device_id, device)
+        if device_type == DEVICE_TYPE_SENSOR_AIR:
+            return self._sensor_air_config(device_id, device)
+        if device_type == DEVICE_TYPE_HVAC_RADIATOR:
+            return self._hvac_radiator_config(device_id, device)
+        if device_type == DEVICE_TYPE_HVAC_FAN:
+            return self._hvac_fan_config(device_id, device)
         if device_type == DEVICE_TYPE_TV:
             return self._tv_config(device_id, device)
+        if device_type == DEVICE_TYPE_INTERCOM:
+            return self._intercom_config(device_id, device)
+        if device_type == DEVICE_TYPE_SENSOR_PIR:
+            return self._sensor_pir_config(device_id, device)
+        if device_type == DEVICE_TYPE_EVENT_BUTTON:
+            return self._event_button_config(device_id, device)
         if device_type == DEVICE_TYPE_AIR_PURIFIER:
             return self._air_purifier_config(device_id, device)
         _LOGGER.warning("Неизвестный тип устройства: %s", device_type)
@@ -554,6 +575,10 @@ class SberSerializer:
         features = ["online", "on_off",
                     "kitchen_water_temperature",
                     "kitchen_water_temperature_set"]
+        if attrs.get("water_entity"):
+            features.append("kitchen_water_level")
+        if attrs.get("water_low_entity"):
+            features.append("kitchen_water_low_level")
 
         model: dict = {
             "id":           "ID_kettle",
@@ -588,6 +613,203 @@ class SberSerializer:
             "sw_version": SW_VERSION,
             "model":      model,
             "model_id":   "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _sensor_door_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для датчика открытия двери/окна (sensor_door).
+
+        Обязательные функции: online, doorcontact_state.
+        Опциональные: battery_percentage (если задан датчик), tamper_alarm (если задан датчик вскрытия).
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "doorcontact_state"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+        if attrs.get("tamper_entity"):
+            features.append("tamper_alarm")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_sensor_door",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_sensor_door",
+                "category": "sensor_door",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _sensor_pir_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для датчика движения (sensor_pir)."""
+        attrs    = device.get("attributes", {})
+        features = ["online", "pir_state"]
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_sensor_pir",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_sensor_pir",
+                "category": "sensor_pir",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _event_button_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для кнопки событий — как сценарная кнопка в Сбере."""
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_event_button",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_event_button",
+                "category": "scenario_button",
+                "features": ["online", "button_event"],
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _sensor_air_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для датчика качества воздуха (sensor_air).
+
+        Обязательные функции: online + минимум один из: temperature, humidity, co2, pm2_5, tvoc_float.
+        Опциональные: battery_percentage, signal_strength.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online"]
+        if attrs.get("temperature_entity"):
+            features.append("temperature")
+        if attrs.get("humidity_entity"):
+            features.append("humidity")
+        if attrs.get("co2_entity"):
+            features.append("co2")
+        if attrs.get("pm25_entity"):
+            features.append("pm2_5")
+        if attrs.get("tvoc_entity"):
+            features.append("tvoc_float")
+        if attrs.get("battery_entity"):
+            features.append("battery_percentage")
+        if attrs.get("signal_entity"):
+            features.append("signal_strength")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_sensor_air",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_sensor_air",
+                "category": "sensor_air",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _hvac_radiator_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для термоголовки радиатора (hvac_radiator).
+
+        Поддерживаемые функции: online, on_off, hvac_temp_set, temperature.
+        hvac_temp_set и temperature — опциональны (включаются если заданы).
+        allowed_values для hvac_temp_set — из min_temp/max_temp/step климат-сущности HA.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "on_off"]
+        if attrs.get("temperature_entity"):
+            features.append("temperature")
+        if attrs.get("hvac_temp_set"):
+            features.append("hvac_temp_set")
+
+        model: dict = {
+            "id": "ID_hvac_radiator",
+            "manufacturer": MANUFACTURER,
+            "model": "Model_hvac_radiator",
+            "category": "hvac_radiator",
+            "features": features,
+        }
+
+        min_t = attrs.get("min_temp")
+        max_t = attrs.get("max_temp")
+        step  = attrs.get("target_temp_step")
+        if min_t is not None and max_t is not None and step is not None:
+            try:
+                model["allowed_values"] = {
+                    "hvac_temp_set": {
+                        "type": "INTEGER",
+                        "integer_values": {
+                            "min":  str(round(float(min_t))),
+                            "max":  str(round(float(max_t))),
+                            "step": str(round(float(step))),
+                        },
+                    }
+                }
+            except (ValueError, TypeError):
+                pass
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": model,
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
+
+    def _hvac_fan_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для вентилятора / бризера (hvac_fan).
+
+        Поддерживаемые функции: online, on_off, hvac_air_flow_power.
+        """
+        attrs    = device.get("attributes", {})
+        features = ["online", "on_off"]
+        if attrs.get("supports_speed"):
+            features.append("hvac_air_flow_power")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_hvac_fan",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_hvac_fan",
+                "category": "hvac_fan",
+                "features": features,
+            },
+            "model_id": "",
         }
         if device.get("room"):
             entry["room"] = device["room"]
@@ -639,6 +861,30 @@ class SberSerializer:
             entry["room"] = device["room"]
         return entry
 
+    def _intercom_config(self, device_id: str, device: dict) -> dict:
+        """Конфиг для домофона (intercom)."""
+        attrs    = device.get("attributes", {})
+        features = ["online", "unlock"]
+        if attrs.get("incoming_call_entity"):
+            features.append("incoming_call")
+
+        entry = {
+            "id": device_id,
+            "name": device.get("name", device_id),
+            "hw_version": HW_VERSION,
+            "sw_version": SW_VERSION,
+            "model": {
+                "id": "ID_intercom",
+                "manufacturer": MANUFACTURER,
+                "model": "Model_intercom",
+                "category": "intercom",
+                "features": features,
+            },
+            "model_id": "",
+        }
+        if device.get("room"):
+            entry["room"] = device["room"]
+        return entry
     def _air_purifier_config(self, device_id: str, device: dict) -> dict:
         """Конфиг для очистителя воздуха (hvac_air_purifier).
 
@@ -838,6 +1084,22 @@ class SberSerializer:
         }
         return json.dumps(payload, ensure_ascii=False)
 
+    def build_intercom_state_payload(
+        self,
+        device_id: str,
+        incoming_call: bool | None = None,
+    ) -> str:
+        """Состояние домофона."""
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+        ]
+        if incoming_call is not None:
+            states.append({
+                "key": "incoming_call",
+                "value": {"type": "BOOL", "bool_value": incoming_call},
+            })
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
     def build_hvac_ac_state_payload(
         self,
         device_id: str,
@@ -899,6 +1161,63 @@ class SberSerializer:
                 "value": {"type": "ENUM", "enum_value": air_flow_direction},
             })
 
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_hvac_fan_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        air_flow_power: str | None = None,
+    ) -> str:
+        """Состояние вентилятора / бризера.
+
+        is_on          — включён/выключен
+        air_flow_power — скорость: auto/low/medium/high/turbo/quiet
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        if air_flow_power:
+            states.append({
+                "key": "hvac_air_flow_power",
+                "value": {"type": "ENUM", "enum_value": air_flow_power},
+            })
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_hvac_radiator_state_payload(
+        self,
+        device_id: str,
+        is_on: bool,
+        target_temp: float | None = None,
+        current_temp: float | None = None,
+    ) -> str:
+        """Состояние термоголовки радиатора.
+
+        is_on        — включён/выключен
+        target_temp  — целевая температура (hvac_temp_set), °C
+        current_temp — текущая температура (temperature), если доступна; × 10
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "on_off", "value": {"type": "BOOL", "bool_value": is_on}},
+        ]
+        if target_temp is not None:
+            try:
+                states.append({
+                    "key": "hvac_temp_set",
+                    "value": {"type": "INTEGER", "integer_value": round(float(target_temp))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if current_temp is not None:
+            try:
+                states.append({
+                    "key": "temperature",
+                    "value": {"type": "INTEGER", "integer_value": round(float(current_temp) * 10)},
+                })
+            except (ValueError, TypeError):
+                pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_vacuum_state_payload(
@@ -1106,6 +1425,147 @@ class SberSerializer:
                 pass
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
+    def build_sensor_door_state_payload(
+        self,
+        device_id: str,
+        is_open: bool,
+        battery: float | None = None,
+        tamper: bool | None = None,
+    ) -> str:
+        """Состояние датчика открытия двери/окна.
+
+        is_open — True если дверь открыта (HA binary_sensor state == 'on')
+        battery — заряд батареи 0–100 (опционально)
+        tamper  — сигнализация о вскрытии (опционально)
+        """
+        doorcontact = "open" if is_open else "close"
+        states: list[dict] = [
+            {"key": "online",            "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "doorcontact_state", "value": {"type": "BOOL", "bool_value": is_open}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        if tamper is not None:
+            states.append({
+                "key": "tamper_alarm",
+                "value": {"type": "BOOL", "bool_value": tamper},
+            })
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_sensor_pir_state_payload(
+        self,
+        device_id: str,
+        motion: bool,
+        battery: float | None = None,
+    ) -> str:
+        """Состояние датчика движения."""
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+            {"key": "pir_state", "value": {"type": "BOOL", "bool_value": motion}},
+        ]
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
+    def build_sensor_air_state_payload(
+        self,
+        device_id: str,
+        temperature: float | None = None,
+        humidity: float | None = None,
+        co2: float | None = None,
+        pm25: float | None = None,
+        tvoc: float | None = None,
+        battery: float | None = None,
+        signal_strength: float | None = None,
+    ) -> str:
+        """Состояние датчика качества воздуха.
+
+        temperature    — температура, °C (передаётся × 10)
+        humidity       — влажность, % (0–100)
+        co2            — концентрация CO₂, ppm
+        pm25           — концентрация PM2.5, мкг/м³
+        tvoc           — концентрация TVOC, ppb
+        battery        — заряд батареи 0–100
+        signal_strength — сила сигнала: low/medium/high
+        """
+        states: list[dict] = [
+            {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
+        ]
+
+        if temperature is not None:
+            try:
+                states.append({
+                    "key": "temperature",
+                    "value": {"type": "INTEGER", "integer_value": round(float(temperature) * 10)},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if humidity is not None:
+            try:
+                states.append({
+                    "key": "humidity",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(humidity))))},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if co2 is not None:
+            try:
+                states.append({
+                    "key": "co2",
+                    "value": {"type": "INTEGER", "integer_value": round(float(co2))},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if pm25 is not None:
+            try:
+                states.append({
+                    "key": "pm2_5",
+                    "value": {"type": "INTEGER", "integer_value": round(float(pm25))},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if tvoc is not None:
+            try:
+                states.append({
+                    "key": "tvoc_float",
+                    "value": {"type": "FLOAT", "float_value": round(float(tvoc), 1)},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if battery is not None:
+            try:
+                states.append({
+                    "key": "battery_percentage",
+                    "value": {"type": "INTEGER", "integer_value": max(0, min(100, round(float(battery))))},
+                })
+            except (ValueError, TypeError):
+                pass
+
+        if signal_strength is not None:
+            states.append({
+                "key": "signal_strength",
+                "value": {"type": "ENUM", "enum_value": self._signal_to_enum(signal_strength)},
+            })
+
+        return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
+
     def build_smoke_state_payload(
         self,
         device_id: str,
@@ -1144,12 +1604,16 @@ class SberSerializer:
         is_on: bool,
         current_temp: float | None = None,
         target_temp: float | None = None,
+        water_level: float | None = None,
+        water_low: bool | None = None,
     ) -> str:
         """Состояние чайника.
 
         is_on        — включён/выключен (on_off)
         current_temp — текущая температура воды 0–100 °C (kitchen_water_temperature)
         target_temp  — целевая температура 0–100 °C (kitchen_water_temperature_set)
+        water_level  — уровень воды в литрах (kitchen_water_level)
+        water_low    — вода закончилась (kitchen_water_low_level)
         """
         states: list[dict] = [
             {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
@@ -1171,6 +1635,19 @@ class SberSerializer:
                 })
             except (ValueError, TypeError):
                 pass
+        if water_level is not None:
+            try:
+                states.append({
+                    "key": "kitchen_water_level",
+                    "value": {"type": "FLOAT", "float_value": round(float(water_level), 2)},
+                })
+            except (ValueError, TypeError):
+                pass
+        if water_low is not None:
+            states.append({
+                "key": "kitchen_water_low_level",
+                "value": {"type": "BOOL", "bool_value": water_low},
+            })
         return json.dumps({"devices": {device_id: {"states": states}}}, ensure_ascii=False)
 
     def build_tv_state_payload(
