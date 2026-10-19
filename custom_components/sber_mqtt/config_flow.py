@@ -25,8 +25,10 @@ from .const import (
     CONF_MQTT_BROKER,
     CONF_MQTT_PORT,
     CONF_HA_TOKEN,
+    CONF_VERIFY_SSL,
     DEFAULT_MQTT_BROKER,
     DEFAULT_MQTT_PORT,
+    DEFAULT_VERIFY_SSL,
 )
 from .mqtt_client import test_mqtt_connection
 
@@ -39,6 +41,7 @@ STEP_USER_SCHEMA = vol.Schema({
     vol.Required(CONF_HA_TOKEN):                                     str,  # Long-Lived Access Token
     vol.Optional(CONF_MQTT_BROKER, default=DEFAULT_MQTT_BROKER):    str,  # Адрес брокера
     vol.Optional(CONF_MQTT_PORT,   default=DEFAULT_MQTT_PORT):      int,  # Порт
+    vol.Optional(CONF_VERIFY_SSL,  default=DEFAULT_VERIFY_SSL):     bool, # Проверять сертификат
 })
 
 
@@ -98,7 +101,8 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
         errors: dict[str, str] = {}
 
         # Текущие настройки — используются как значения по умолчанию в форме
-        current = dict(self.config_entry.data)
+        # (options перекрывают data — иначе после сохранения форма показывала бы старые значения)
+        current = {**self.config_entry.data, **self.config_entry.options}
 
         if user_input is not None:
             # Проверяем новые учётные данные
@@ -115,6 +119,7 @@ class SberMQTTOptionsFlow(config_entries.OptionsFlow):
             vol.Required(CONF_HA_TOKEN,      default=current.get(CONF_HA_TOKEN, "")):                   str,
             vol.Optional(CONF_MQTT_BROKER,   default=current.get(CONF_MQTT_BROKER, DEFAULT_MQTT_BROKER)): str,
             vol.Optional(CONF_MQTT_PORT,     default=current.get(CONF_MQTT_PORT,   DEFAULT_MQTT_PORT)):   int,
+            vol.Optional(CONF_VERIFY_SSL,    default=current.get(CONF_VERIFY_SSL,  DEFAULT_VERIFY_SSL)):  bool,
         })
 
         return self.async_show_form(  # type: ignore[return-value]

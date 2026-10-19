@@ -10,10 +10,15 @@ CONF_MQTT_PASSWORD = "mqtt_password"  # Пароль
 CONF_HA_TOKEN      = "ha_token"       # Long-Lived Access Token для панели управления
 CONF_MQTT_BROKER   = "mqtt_broker"    # Адрес брокера (можно переопределить)
 CONF_MQTT_PORT     = "mqtt_port"      # Порт брокера
+CONF_VERIFY_SSL    = "verify_ssl"     # Проверять TLS-сертификат брокера
 
 # ── Параметры MQTT брокера Сбера по умолчанию ─────────────────────────────
 DEFAULT_MQTT_BROKER = "mqtt-partners.iot.sberdevices.ru"
 DEFAULT_MQTT_PORT   = 8883  # TLS порт
+DEFAULT_VERIFY_SSL  = True  # По умолчанию сертификат брокера проверяется
+# Сколько раз подряд проверка сертификата может не пройти, прежде чем клиент
+# подключится без проверки (на случай, если Сбер перевыпустил сертификат)
+CERT_FAILURES_BEFORE_FALLBACK = 3
 
 # ── MQTT топики ───────────────────────────────────────────────────────────
 # {login} подставляется из настроек интеграции

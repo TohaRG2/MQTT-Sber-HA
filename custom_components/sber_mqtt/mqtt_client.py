@@ -18,15 +18,20 @@ from typing import Any, Callable
 
 import paho.mqtt.client as mqtt
 
+from homeassistant.components import persistent_notification
 from homeassistant.core import HomeAssistant
 
+from .tls import build_ssl_context
 from .const import (
+    CERT_FAILURES_BEFORE_FALLBACK,
     CONF_MQTT_LOGIN,
     CONF_MQTT_PASSWORD,
     CONF_MQTT_BROKER,
     CONF_MQTT_PORT,
+    CONF_VERIFY_SSL,
     DEFAULT_MQTT_BROKER,
     DEFAULT_MQTT_PORT,
+    DEFAULT_VERIFY_SSL,
     TOPIC_UP_CONFIG,
     TOPIC_UP_STATUS,
     TOPIC_DOWN_COMMANDS,
@@ -36,6 +41,9 @@ from .const import (
 )
 
 _LOGGER = logging.getLogger(__name__)
+
+# id постоянного уведомления в HA о подключении без проверки сертификата
+_INSECURE_NOTIFICATION_ID = "sber_mqtt_insecure_ssl"
 
 
 class SberMQTTClient:
@@ -69,6 +77,12 @@ class SberMQTTClient:
         self._password = config[CONF_MQTT_PASSWORD]
         self._broker   = config.get(CONF_MQTT_BROKER, DEFAULT_MQTT_BROKER)
         self._port     = config.get(CONF_MQTT_PORT, DEFAULT_MQTT_PORT)
+        self._verify_ssl = config.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL)
+
+        # Автоматический откат на подключение без проверки сертификата
+        self._cert_failures: int = 0              # подряд неудачных проверок сертификата
+        self._insecure_fallback: bool = False     # сейчас подключены без проверки
+        self._last_cert_error: str | None = None  # текст последней ошибки проверки
 
         # Колбэки бизнес-логики — передаются снаружи, не зависят от клиента
         self._on_command        = on_command
@@ -107,6 +121,9 @@ class SberMQTTClient:
             "connected":           self._connected,
             "broker":              self._broker,
             "port":                self._port,
+            "verify_ssl":         self._verify_ssl,
+            "insecure_fallback":   self._insecure_fallback,
+            "cert_failures":       self._cert_failures,
             "login":               self._login,
             "last_error":          self._last_error,
             "last_error_time":     self._last_error_time,
@@ -208,16 +225,85 @@ class SberMQTTClient:
         return self.connect()
 
     def connect(self) -> bool:
-        """Подключается к брокеру Сбера. Блокирующий метод — вызывать через executor."""
+        """Подключается к брокеру Сбера. Блокирующий метод — вызывать через executor.
+
+        Если проверка сертификата включена, но подряд CERT_FAILURES_BEFORE_FALLBACK
+        попыток не прошли именно из-за сертификата (например, Сбер его перевыпустил),
+        подключается без проверки и показывает уведомление в HA. Сетевые ошибки,
+        таймауты и отказ по логину/паролю в счётчик не входят. Пока клиент в режиме
+        отката, каждое переподключение сначала снова пробует с проверкой — как
+        только сертификат снова проходит проверку, режим отката выключается.
+        """
+        if not self._verify_ssl:
+            _LOGGER.warning("Sber MQTT: проверка TLS-сертификата брокера отключена в настройках")
+            ok, _ = self._connect_with(verify=False)
+            return ok
+
+        ok, cert_error = self._connect_with(verify=True)
+        if ok:
+            self._cert_failures = 0
+            if self._insecure_fallback:
+                self._insecure_fallback = False
+                _LOGGER.info("Sber MQTT: сертификат брокера снова проходит проверку")
+                self._hass.add_job(
+                    persistent_notification.async_dismiss,
+                    self._hass,
+                    _INSECURE_NOTIFICATION_ID,
+                )
+            return True
+        if not cert_error:
+            return False
+
+        self._cert_failures += 1
+        if self._cert_failures < CERT_FAILURES_BEFORE_FALLBACK:
+            _LOGGER.warning(
+                "Sber MQTT: проверка сертификата не пройдена (%d из %d) — "
+                "после %d неудач подключимся без проверки",
+                self._cert_failures, CERT_FAILURES_BEFORE_FALLBACK,
+                CERT_FAILURES_BEFORE_FALLBACK,
+            )
+            return False
+
+        _LOGGER.warning(
+            "Sber MQTT: проверка сертификата не прошла %d раз подряд — "
+            "подключаемся без проверки сертификата",
+            self._cert_failures,
+        )
+        ok, _ = self._connect_with(verify=False)
+        if ok and not self._insecure_fallback:
+            self._insecure_fallback = True
+            self._hass.add_job(
+                persistent_notification.async_create,
+                self._hass,
+                "Не удалось проверить TLS-сертификат MQTT-брокера Сбера "
+                f"({self._last_cert_error}). Возможно, Сбер перевыпустил сертификат.\n\n"
+                "Подключение выполнено **без проверки сертификата**: трафик зашифрован, "
+                "но защиты от подмены сервера нет. Интеграция будет при каждом "
+                "переподключении снова пробовать подключаться с проверкой. "
+                "Обновите интеграцию (в ней может быть новый сертификат "
+                "`certs/sber_mqtt_broker.pem`) или проверьте, что сертификат "
+                "действительно перевыпущен Сбером.",
+                "Sber MQTT: подключение без проверки сертификата",
+                _INSECURE_NOTIFICATION_ID,
+            )
+        elif ok:
+            _LOGGER.warning("Sber MQTT: подключение без проверки сертификата сохраняется")
+        return ok
+
+    def _connect_with(self, verify: bool) -> tuple[bool, bool]:
+        """Одна попытка подключения. Блокирующий метод.
+
+        Возвращает (успех, ошибка_проверки_сертификата). Второй флаг True только
+        если подключение не удалось именно из-за проверки сертификата — по нему
+        connect() решает, считать ли попытку в счётчик отката.
+        """
         import threading
         try:
             client = mqtt.Client()
             client.username_pw_set(self._login, self._password)
 
-            # Сбер требует TLS, но использует самоподписанный сертификат —
-            # поэтому проверку сертификата отключаем
-            client.tls_set(certfile=None, keyfile=None, cert_reqs=ssl.CERT_NONE)
-            client.tls_insecure_set(True)
+            # Сертификат брокера Сбера закреплён в certs/ (приватный CA Сбера)
+            client.tls_set_context(build_ssl_context(verify))
 
             # Системные колбэки paho
             client.on_connect    = self._on_connect
@@ -258,21 +344,29 @@ class SberMQTTClient:
             connected = connect_event.wait(timeout=10)
             if connected and connect_result and connect_result[0] == 0:
                 _LOGGER.info("Sber MQTT: соединение подтверждено брокером")
-                return True
+                return True, False
             elif connected and connect_result:
                 _LOGGER.error("Sber MQTT: брокер отклонил подключение, rc=%s", connect_result[0])
-                return False
+                return False, False
             else:
                 _LOGGER.error("Sber MQTT: таймаут ожидания подключения (10с)")
                 self._last_error = "Таймаут ожидания подключения (10 с). Проверьте адрес брокера и порт."
                 self._last_error_time = _time.time()
-                return False
+                return False, False
+
+        except (ssl.SSLCertVerificationError, FileNotFoundError) as exc:
+            # FileNotFoundError — нет закреплённого PEM (build_ssl_context(True))
+            _LOGGER.error("Sber MQTT: сертификат брокера не прошёл проверку: %s", exc)
+            self._last_cert_error = str(exc)
+            self._last_error = f"Проверка сертификата: {exc}"
+            self._last_error_time = _time.time()
+            return False, True
 
         except Exception as exc:
             _LOGGER.error("Sber MQTT: ошибка подключения: %s", exc)
             self._last_error = str(exc)
             self._last_error_time = _time.time()
-            return False
+            return False, False
 
     def disconnect(self) -> None:
         """Отключается от брокера. Блокирующий метод — вызывать через executor."""
@@ -499,8 +593,9 @@ async def test_mqtt_connection(config: dict[str, Any]) -> bool:
         try:
             c = mqtt.Client()
             c.username_pw_set(config[CONF_MQTT_LOGIN], config[CONF_MQTT_PASSWORD])
-            c.tls_set(certfile=None, keyfile=None, cert_reqs=ssl.CERT_NONE)
-            c.tls_insecure_set(True)
+            c.tls_set_context(
+                build_ssl_context(config.get(CONF_VERIFY_SSL, DEFAULT_VERIFY_SSL))
+            )
             c.on_connect      = on_connect
             c.on_connect_fail = on_connect_fail
             c.connect_async(

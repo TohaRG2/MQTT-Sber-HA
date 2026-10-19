@@ -9,7 +9,11 @@
           "mqtt_password": "MQTT Password",
           "mqtt_broker": "Broker Address",
           "mqtt_port": "Port",
+          "verify_ssl": "Verify broker certificate",
           "ha_token": "Long-Lived Access Token"
+        },
+        "data_description": {
+          "verify_ssl": "Recommended to keep enabled. If the certificate fails verification 3 times in a row (e.g. Sber re-issued it), the integration connects without verification and shows a notification. Unchecking disables verification permanently."
         }
       }
     },
@@ -32,7 +36,11 @@
           "mqtt_password": "MQTT Password",
           "mqtt_broker": "Broker Address",
           "mqtt_port": "Port",
+          "verify_ssl": "Verify broker certificate",
           "ha_token": "Long-Lived Access Token"
+        },
+        "data_description": {
+          "verify_ssl": "Recommended to keep enabled. If the certificate fails verification 3 times in a row (e.g. Sber re-issued it), the integration connects without verification and shows a notification. Unchecking disables verification permanently."
         }
       }
     }
