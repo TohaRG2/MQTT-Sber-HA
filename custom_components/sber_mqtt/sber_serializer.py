@@ -934,31 +934,49 @@ class SberSerializer:
         """Конфиг для увлажнителя воздуха (hvac_humidifier).
 
         Обязательные функции: online, on_off.
-        Остальные: humidity, hvac_air_flow_power, hvac_humidity_set,
+        Остальные: humidity, hvac_humidity_set, hvac_air_flow_power,
                    hvac_replace_filter, hvac_water_percentage.
+
+        Скорость вентилятора объявляется только если её есть чем управлять:
+        настроена отдельная сущность (speed_entity + speed_map) либо сама
+        humidifier-сущность имеет подходящие режимы. В allowed_values
+        передаются только реально доступные скорости.
         """
-        attrs    = device.get("attributes", {})
-        features = ["online", "on_off", "humidity", "hvac_air_flow_power",
-                    "hvac_humidity_set", "hvac_replace_filter", "hvac_water_percentage"]
+        from .humidifier import declared_speed_values
+
+        attrs        = device.get("attributes", {})
+        speed_values = declared_speed_values(attrs)
+        features     = ["online", "on_off", "humidity", "hvac_humidity_set"]
+        if speed_values:
+            features.append("hvac_air_flow_power")
 
         # Убираем опциональные фичи если сенсор не задан
-        if not attrs.get("water_percentage_entity"):
-            features.remove("hvac_water_percentage")
-        if not attrs.get("replace_filter_entity"):
-            features.remove("hvac_replace_filter")
+        if attrs.get("water_percentage_entity"):
+            features.append("hvac_water_percentage")
+        if attrs.get("replace_filter_entity"):
+            features.append("hvac_replace_filter")
+
+        model: dict = {
+            "id": "ID_humidifier",
+            "manufacturer": MANUFACTURER,
+            "model": "Model_humidifier",
+            "category": "hvac_humidifier",
+            "features": features,
+        }
+        if speed_values:
+            model["allowed_values"] = {
+                "hvac_air_flow_power": {
+                    "type": "ENUM",
+                    "enum_values": {"values": speed_values},
+                }
+            }
 
         entry = {
             "id": device_id,
             "name": device.get("name", device_id),
             "hw_version": HW_VERSION,
             "sw_version": SW_VERSION,
-            "model": {
-                "id": "ID_humidifier",
-                "manufacturer": MANUFACTURER,
-                "model": "Model_humidifier",
-                "category": "hvac_humidifier",
-                "features": features,
-            },
+            "model": model,
             "model_id": "",
         }
         if device.get("room"):

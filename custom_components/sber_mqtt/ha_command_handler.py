@@ -954,9 +954,13 @@ class HACommandHandler:
         Поддерживаемые команды:
           on_off              — включить/выключить (humidifier.turn_on / turn_off)
           hvac_humidity_set   — установить целевую влажность (humidifier.set_humidity)
-          hvac_air_flow_power — установить режим/скорость (humidifier.set_mode)
+          hvac_air_flow_power — установить скорость. Если в настройках выбрана
+                                отдельная сущность (number/input_number или
+                                select/input_select) — меняем её значение,
+                                иначе переключаем режим humidifier.set_mode.
         """
-        from .const import SBER_AIR_FLOW_TO_HA_MODE
+        from .const import HUMIDIFIER_NUMBER_DOMAINS, HUMIDIFIER_SELECT_DOMAINS
+        from .humidifier import clean_speed_map, domain_of, sber_to_mode
 
         attrs     = device.get("attributes", {})
         entity_id = attrs.get("entity_id", "")
@@ -995,7 +999,55 @@ class HACommandHandler:
 
             elif key == "hvac_air_flow_power":
                 sber_mode = val_obj.get("enum_value", "")
-                ha_mode   = SBER_AIR_FLOW_TO_HA_MODE.get(sber_mode)
+                speed_entity = attrs.get("speed_entity", "")
+                target = clean_speed_map(attrs).get(sber_mode)
+
+                if speed_entity and target is not None:
+                    speed_domain = domain_of(speed_entity)
+                    if speed_domain in HUMIDIFIER_SELECT_DOMAINS:
+                        _LOGGER.info(
+                            "Humidifier %s: hvac_air_flow_power=%s → %s.select_option(%s)",
+                            device.get("id"), sber_mode, speed_domain, target,
+                        )
+                        self._track_ha_command(
+                            device, states, speed_domain, "select_option",
+                            {"entity_id": speed_entity, "option": target},
+                        )
+                        await self._async_call(
+                            speed_domain, "select_option",
+                            {"entity_id": speed_entity, "option": target},
+                            blocking=False,
+                        )
+                    elif speed_domain in HUMIDIFIER_NUMBER_DOMAINS:
+                        try:
+                            value = float(target)
+                        except (ValueError, TypeError):
+                            _LOGGER.warning(
+                                "Humidifier %s: скорость %s → '%s' не число",
+                                device.get("id"), sber_mode, target,
+                            )
+                            continue
+                        _LOGGER.info(
+                            "Humidifier %s: hvac_air_flow_power=%s → %s.set_value(%s)",
+                            device.get("id"), sber_mode, speed_domain, value,
+                        )
+                        self._track_ha_command(
+                            device, states, speed_domain, "set_value",
+                            {"entity_id": speed_entity, "value": value},
+                        )
+                        await self._async_call(
+                            speed_domain, "set_value",
+                            {"entity_id": speed_entity, "value": value},
+                            blocking=False,
+                        )
+                    else:
+                        _LOGGER.warning(
+                            "Humidifier %s: неподдерживаемый домен скорости '%s'",
+                            device.get("id"), speed_domain,
+                        )
+                    continue
+
+                ha_mode = sber_to_mode(sber_mode, attrs.get("available_modes"))
                 if ha_mode:
                     _LOGGER.info("Humidifier %s: set_mode=%s (sber=%s)", device.get("id"), ha_mode, sber_mode)
                     self._track_ha_command(device, states, "humidifier", "set_mode",

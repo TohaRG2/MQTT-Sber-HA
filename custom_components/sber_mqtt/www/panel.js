@@ -345,7 +345,7 @@ function openWizard(){
 function closeWizard(){
   document.getElementById('wiz').style.display='none';
   // Полный сброс состояния чтобы следующее открытие начиналось чисто
-  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haSmoke=[];haKettle=[];haNumber=[];haDoor=[];haAir=[];haRadiator=[];haFan=[];haTV=[];haAP={power:[],controls:[],sensors:[]};haIntercom=[];haPir=[];haEventBtns=[];
+  wStep=1;wType=null;wData={};sFilter='';spField=null;haRelay=[];haSensors=[];haClimate=[];haVacuum=[];haValve=[];haLight=[];haCover=[];haWaterLeak=[];haHumidifier=[];haHumControls=[];haSmoke=[];haKettle=[];haNumber=[];haDoor=[];haAir=[];haRadiator=[];haFan=[];haTV=[];haAP={power:[],controls:[],sensors:[]};haIntercom=[];haPir=[];haEventBtns=[];
   const btn=document.getElementById('btnNext');
   if(btn){btn.disabled=false;btn.textContent='Далее →';}
 }
@@ -391,7 +391,7 @@ async function wizValidate(){
     }
     if(wType==='tv'&&!wData.entity_id){toast('Выберите телевизор (media_player)','err');return false;}
     if(wType==='air_purifier'){const e=apValidate();if(e){toast(e,'err');return false;}}
-    if(wType==='humidifier'&&!wData.entity_id){toast('Выберите увлажнитель','err');return false;}
+    if(wType==='humidifier'){const e=humValidate();if(e){toast(e,'err');return false;}}
     if(wType==='sensor_temp'&&!wData.temperature_entity&&!wData.humidity_entity){toast('Выберите температуру или влажность','err');return false;}
     if(wType==='sensor_door'&&!wData.entity_id){toast('Выберите датчик открытия','err');return false;}
     if(wType==='hvac_radiator'&&!wData.entity_id){toast('Выберите климатическую сущность','err');return false;}
@@ -828,6 +828,10 @@ async function submitDevice(){
   }
   else if(wType==='humidifier'){
     attrs.entity_id=wData.entity_id;attrs.entity_name=wData.entity_name||'';
+    // Скорость вентилятора: отдельная сущность number/select. Пустые
+    // значения передаём явно, чтобы при редактировании сбросить старые.
+    attrs.speed_entity=wData.speed_entity||'';
+    attrs.speed_map=(wData.speed_entity&&wData.speed_map)?wData.speed_map:{};
     if(wData.water_percentage_entity)attrs.water_percentage_entity=wData.water_percentage_entity;
     if(wData.replace_filter_entity)  attrs.replace_filter_entity=wData.replace_filter_entity;
   }
@@ -1493,14 +1497,160 @@ function clearSmokeMute(){delete wData.alarm_mute_entity;delete wData.alarm_mute
 // WIZARD: УВЛАЖНИТЕЛЬ ВОЗДУХА
 // ═══════════════════════════════════════════════════════════
 // ── Увлажнитель воздуха ───────────────────────────────────────────────────
-let haHumidifier=[];
+let haHumidifier=[], haHumControls=[];
 async function fetchHumidifier(){
   if(haHumidifier.length)return;
-  try{haHumidifier=(await api('/api/sber_mqtt/ha_entities/humidifier')).entities||[];}
+  try{
+    const r=await api('/api/sber_mqtt/ha_entities/humidifier');
+    haHumidifier=r.entities||[];haHumControls=r.controls||[];
+  }
   catch(e){toast('Ошибка загрузки увлажнителей','err');}
 }
 
 const SBER_MODES=['auto','low','medium','high','turbo','quiet'];
+
+// ── Скорость вентилятора увлажнителя ─────────────────────────────────────
+// Сбер ждёт ENUM hvac_air_flow_power. В HA скорость может быть отдельной
+// сущностью: number/input_number («Интенсивность» 0–3) или select.
+const HUM_SPEEDS=[
+  {key:'auto',  label:'Авто',    guess:['auto','авто']},
+  {key:'quiet', label:'Тихая',   guess:['quiet','silent','sleep','тих','бесшум','ноч']},
+  {key:'low',   label:'Низкая',  guess:['low','min','низк']},
+  {key:'medium',label:'Средняя', guess:['medium','mid','normal','средн']},
+  {key:'high',  label:'Высокая', guess:['high','max','выс']},
+  {key:'turbo', label:'Турбо',   guess:['turbo','boost','турбо','макс']},
+];
+const HUM_NUMBER_DOMAINS=['number','input_number'];
+function humIsNumber(e){return !!e&&HUM_NUMBER_DOMAINS.includes(e.domain);}
+function humFindControl(eid){return haHumControls.find(e=>e.entity_id===eid)||null;}
+function humPickOption(options,guesses,taken){
+  const free=(options||[]).filter(o=>!(taken||[]).includes(String(o)));
+  for(const g of guesses){const h=free.find(o=>String(o).toLowerCase()===g);if(h!==undefined)return String(h);}
+  for(const g of guesses){const h=free.find(o=>String(o).toLowerCase().includes(g));if(h!==undefined)return String(h);}
+  return '';
+}
+// Для number/input_number раскладываем диапазон на скорости.
+// 0–3 → тихая=0, низкая=1, средняя=2, высокая=3 (турбо не задаём).
+function humGuessNumberMap(e){
+  const min=Number(e.min),max=Number(e.max);
+  let step=Number(e.step);
+  if(!isFinite(min)||!isFinite(max)||max<min)return {};
+  if(!isFinite(step)||step<=0)step=1;
+  const count=Math.floor((max-min)/step+1e-9)+1;
+  const val=i=>String(Number((min+i*step).toFixed(6)));
+  const map={};
+  if(count>=5){map.quiet=val(0);map.low=val(1);map.medium=val(2);map.high=val(3);map.turbo=val(count-1);}
+  else if(count===4){map.quiet=val(0);map.low=val(1);map.medium=val(2);map.high=val(3);}
+  else if(count===3){map.low=val(0);map.medium=val(1);map.high=val(2);}
+  else if(count===2){map.low=val(0);map.high=val(1);}
+  else{map.high=val(0);}
+  return map;
+}
+function humGuessSpeedMap(e){
+  if(!e)return {};
+  if(humIsNumber(e))return humGuessNumberMap(e);
+  const map={},taken=[];
+  for(const s of HUM_SPEEDS){const o=humPickOption(e.options||[],s.guess,taken);if(o){map[s.key]=o;taken.push(o);}}
+  return map;
+}
+function humFindAutoSpeed(humEntity){
+  if(!humEntity)return null;
+  const dev=humEntity.device_id;
+  const same=haHumControls.filter(e=>dev&&e.device_id===dev);
+  const pool=same.length?same:haHumControls;
+  const nameRe=/speed|fan|intensity|power|скорост|интенсив|вентилятор|мощност/i;
+  const named=pool.filter(e=>nameRe.test(e.entity_id+' '+e.friendly_name));
+  for(const e of named){
+    const m=humGuessSpeedMap(e);
+    if(Object.values(m).filter(Boolean).length)return {e,map:m};
+  }
+  for(const e of pool){
+    if(!humIsNumber(e)){
+      const m=humGuessSpeedMap(e);
+      if(Object.values(m).filter(Boolean).length>=2)return {e,map:m};
+    }
+  }
+  for(const e of pool){
+    if(humIsNumber(e)){
+      const m=humGuessSpeedMap(e);
+      if(Object.values(m).filter(Boolean).length>=2)return {e,map:m};
+    }
+  }
+  return null;
+}
+function humSpeedCard(humEntity){
+  const eid=wData.speed_entity||'';
+  const ctrl=eid?humFindControl(eid):null;
+  const dev=humEntity?humEntity.device_id:'';
+  const mk=e=>`<option value="${esc(e.entity_id)}" ${eid===e.entity_id?'selected':''}>${esc(e.friendly_name)} — ${esc(e.entity_id)}</option>`;
+  const same=haHumControls.filter(e=>dev&&e.device_id===dev);
+  const other=haHumControls.filter(e=>!(dev&&e.device_id===dev));
+  const picker=`<select style="${AP_SEL_STYLE}" onchange="humSetSpeedEntity(this.value)">
+      <option value="">— не использовать (брать режим humidifier) —</option>
+      ${same.length?`<optgroup label="Это же устройство">${same.map(mk).join('')}</optgroup>`:''}
+      ${other.length?`<optgroup label="Остальные сущности">${other.map(mk).join('')}</optgroup>`:''}
+    </select>`;
+  let mapping='';
+  if(ctrl){
+    const map=wData.speed_map||{};
+    if(humIsNumber(ctrl)){
+      const range=`${ctrl.min!==null&&ctrl.min!==undefined?ctrl.min:'?'}–${ctrl.max!==null&&ctrl.max!==undefined?ctrl.max:'?'}${ctrl.step?', шаг '+ctrl.step:''}`;
+      mapping=`<div style="font-size:11px;color:var(--muted);margin-top:8px">Значение сущности для каждой скорости (диапазон ${range}):</div>`
+        +HUM_SPEEDS.map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+            <span style="width:84px;font-size:12px;flex-shrink:0">${s.label}</span>
+            <input type="number" step="any" placeholder="— не поддерживается —" value="${esc(map[s.key]??'')}"
+              oninput="humSetSpeed('${s.key}',this.value)" style="${AP_SEL_INLINE}"/>
+          </div>`).join('');
+    }else{
+      const opts=ctrl.options||[];
+      mapping=opts.length
+        ?`<div style="font-size:11px;color:var(--muted);margin-top:8px">Какая опция выбирается для каждой скорости в Салюте:</div>`
+          +HUM_SPEEDS.map(s=>`<div style="display:flex;align-items:center;gap:8px;margin-top:5px">
+              <span style="width:84px;font-size:12px;flex-shrink:0">${s.label}</span>
+              <div style="flex:1"><select style="${AP_SEL_INLINE}" onchange="humSetSpeed('${s.key}',this.value)">
+                <option value="">— не поддерживается —</option>
+                ${opts.map(o=>`<option value="${esc(o)}" ${(map[s.key]||'')===String(o)?'selected':''}>${esc(o)}</option>`).join('')}
+              </select></div></div>`).join('')
+        :`<div style="font-size:11px;color:var(--danger);margin-top:8px">⚠️ У сущности нет списка options — сопоставить скорости невозможно.</div>`;
+    }
+  }
+  const modes=(humEntity&&humEntity.available_modes)||[];
+  const fallback=modes.length
+    ?`Режимы humidifier: <b>${modes.map(esc).join(', ')}</b>. Если отдельная сущность не выбрана, скорость берётся из режима (boost → турбо).`
+    :'У сущности нет режимов — без отдельной сущности скорости управлять ею нельзя.';
+  return `<div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
+    <div style="font-size:13px;font-weight:600;color:var(--text)">🌀 Скорость вентилятора</div>
+    <div style="font-size:11px;color:var(--muted);margin-top:2px">number / input_number (например, «Интенсивность» 0–3) или select / input_select. ${fallback}</div>
+    ${picker}${mapping}
+  </div>`;
+}
+function humSetSpeedEntity(eid){
+  delete wData.speed_entity;delete wData.speed_map;
+  if(eid){const e=humFindControl(eid);wData.speed_entity=eid;wData.speed_map=humGuessSpeedMap(e);}
+  document.getElementById('wizContent').innerHTML=renderStep2Humidifier();
+}
+function humSetSpeed(key,val){
+  wData.speed_map=wData.speed_map||{};
+  if(val===''||val===null||val===undefined)delete wData.speed_map[key];
+  else wData.speed_map[key]=String(val);
+}
+function humValidate(){
+  if(!wData.entity_id)return 'Выберите увлажнитель';
+  const eid=wData.speed_entity;
+  if(!eid)return '';
+  const map=wData.speed_map||{};
+  if(!Object.values(map).some(v=>v!==undefined&&v!==''))
+    return 'Скорость: сопоставьте хотя бы одно значение Сбера с сущностью';
+  const e=humFindControl(eid);
+  if(e&&humIsNumber(e)){
+    for(const s of HUM_SPEEDS){
+      const v=map[s.key];
+      if(v===undefined||v==='')continue;
+      if(isNaN(Number(v)))return `Скорость «${s.label}»: укажите число`;
+    }
+  }
+  return '';
+}
 
 function renderStep2Humidifier(){
   const sel=wData.entity_id;
@@ -1534,6 +1684,7 @@ function renderStep2Humidifier(){
       <div class="p-list" style="max-height:160px" id="humlist">${humItems()}</div>
     </div>
     ${sel?`<div style="margin-top:10px;padding:8px 12px;background:var(--primary-lt);border-radius:7px;font-size:12px;color:var(--primary-dk)">✓ Выбрано: <b>${esc(sel)}</b></div>`:''}
+    ${sel?humSpeedCard(entity):''}
     <div style="margin-top:14px;padding:12px 14px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
       <div style="font-size:12px;font-weight:600;margin-bottom:8px;color:var(--text)">Дополнительные сенсоры</div>
       ${optHtml}
@@ -1557,7 +1708,14 @@ function humItems(){
     <span class="p-name">${esc(e.friendly_name)}${usedBadge(e.entity_id)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickHumEntity(eid,name,area){
+  const changed=wData.entity_id!==eid;
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
+  if(changed){
+    delete wData.speed_entity;delete wData.speed_map;
+    const hum=haHumidifier.find(x=>x.entity_id===eid);
+    const auto=humFindAutoSpeed(hum);
+    if(auto){wData.speed_entity=auto.e.entity_id;wData.speed_map=auto.map;}
+  }
   document.getElementById('wizContent').innerHTML=renderStep2Humidifier();
 }
 let _humSensorPickerKey='';

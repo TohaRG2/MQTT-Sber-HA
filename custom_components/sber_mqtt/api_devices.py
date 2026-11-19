@@ -109,7 +109,12 @@ class SberDevicesView(HomeAssistantView):
             if "room" in body:
                 existing["room"] = body["room"]
             if attrs:
-                existing["attributes"] = {**existing.get("attributes", {}), **attrs}
+                merged = {**existing.get("attributes", {}), **attrs}
+                if device_type == DEVICE_TYPE_HUMIDIFIER:
+                    error = _validate_humidifier_attrs(hass, merged)
+                    if error:
+                        return web.json_response({"error": error}, status=400)
+                existing["attributes"] = merged
             await registry.async_save()
             state_tracker.refresh()
             config_payload = serializer.build_config_payload(registry.devices)
@@ -190,10 +195,9 @@ class SberDevicesView(HomeAssistantView):
                     {"error": "attributes.entity_id is required for water_leak"}, status=400
                 )
         elif device_type == DEVICE_TYPE_HUMIDIFIER:
-            if not attrs.get("entity_id"):
-                return web.json_response(
-                    {"error": "attributes.entity_id is required for humidifier"}, status=400
-                )
+            error = _validate_humidifier_attrs(hass, attrs)
+            if error:
+                return web.json_response({"error": error}, status=400)
         elif device_type == DEVICE_TYPE_SMOKE:
             if not attrs.get("entity_id"):
                 return web.json_response(
@@ -609,6 +613,91 @@ class SberSettingsView(HomeAssistantView):
         if handler := data.get("command_handler"):
             handler.set_user_id(user_id)
         return web.json_response({"ok": True, "user_id": user_id})
+
+
+def _validate_humidifier_attrs(hass: HomeAssistant, attrs: dict) -> str | None:
+    """Проверяет и нормализует (на месте) настройки увлажнителя воздуха.
+
+    Возвращает текст ошибки или None. Пустые значения удаляются, чтобы
+    незаполненный слот не считался заданным.
+    """
+    from .const import (
+        HUMIDIFIER_NUMBER_DOMAINS,
+        HUMIDIFIER_SPEED_DOMAINS,
+    )
+    from .humidifier import clean_speed_map
+
+    entity_id = (attrs.get("entity_id") or "").strip()
+    if not entity_id:
+        return "attributes.entity_id is required for humidifier"
+    attrs["entity_id"] = entity_id
+
+    # Режимы humidifier нужны для allowed_values и для fallback-команд
+    # set_mode. Запоминаем их при добавлении/редактировании устройства.
+    state = hass.states.get(entity_id)
+    if state is not None:
+        attrs["available_modes"] = [
+            str(m) for m in (state.attributes.get("available_modes") or [])
+        ]
+    else:
+        attrs.setdefault("available_modes", [])
+
+    speed_entity = (attrs.get("speed_entity") or "").strip()
+    if not speed_entity:
+        attrs.pop("speed_entity", None)
+        attrs.pop("speed_map", None)
+        return None
+
+    domain = speed_entity.split(".", 1)[0]
+    if domain not in HUMIDIFIER_SPEED_DOMAINS:
+        return (
+            "speed_entity must be select, input_select, number or input_number"
+        )
+
+    smap = clean_speed_map(attrs)
+    if not smap:
+        return "speed_map must map at least one Sber speed to a value"
+
+    speed_state = hass.states.get(speed_entity)
+    if domain in HUMIDIFIER_NUMBER_DOMAINS:
+        min_v = max_v = None
+        if speed_state is not None:
+            try:
+                if speed_state.attributes.get("min") is not None:
+                    min_v = float(speed_state.attributes["min"])
+                if speed_state.attributes.get("max") is not None:
+                    max_v = float(speed_state.attributes["max"])
+            except (ValueError, TypeError):
+                min_v = max_v = None
+
+        for sber, value in smap.items():
+            try:
+                number = float(value)
+            except (ValueError, TypeError):
+                return (
+                    f"speed_map.{sber} = '{value}' must be numeric "
+                    "for number/input_number entity"
+                )
+            if min_v is not None and number < min_v - 1e-9:
+                return f"speed_map.{sber} = {number} is below minimum {min_v}"
+            if max_v is not None and number > max_v + 1e-9:
+                return f"speed_map.{sber} = {number} is above maximum {max_v}"
+    else:
+        if speed_state is not None:
+            options = [str(o) for o in (speed_state.attributes.get("options") or [])]
+            if options:
+                for sber, value in smap.items():
+                    if value not in options:
+                        return (
+                            f"speed_map.{sber} = '{value}' is not an option "
+                            f"of {speed_entity}: {options}"
+                        )
+
+    attrs["speed_entity"] = speed_entity
+    attrs["speed_map"] = smap
+    return None
+
+
 def _validate_air_purifier_attrs(attrs: dict) -> str | None:
     """Проверяет и нормализует (на месте) настройки очистителя воздуха.
 

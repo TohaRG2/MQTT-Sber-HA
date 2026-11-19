@@ -403,3 +403,35 @@ AIR_PURIFIER_ENTITY_KEYS = (
     *(f"{n}_entity" for n in AIR_PURIFIER_BOOL_FEATURES),
     *(f"{n}_entity" for n in AIR_PURIFIER_REPLACE_FEATURES),
 )
+
+# ── Увлажнитель воздуха (hvac_humidifier) ─────────────────────────────────
+# В HA увлажнитель — это сущность humidifier, но скорость вентилятора у
+# некоторых моделей вынесена в отдельную сущность: number/input_number
+# (например, «Интенсивность» 0–3) или select/input_select.
+#
+# Атрибуты устройства (device["attributes"]):
+#   entity_id                    — сущность humidifier (вкл/выкл, влажность)
+#   water_percentage_entity      — опционально: sensor уровня воды в баке
+#   replace_filter_entity        — опционально: binary_sensor замены фильтра
+#   speed_entity + speed_map     — опционально: скорость вентилятора.
+#                                  speed_map = {значение Сбера: опция select
+#                                  или число для number/input_number}
+#   available_modes              — режимы humidifier на момент добавления
+#                                  (нужны для allowed_values и fallback)
+HUMIDIFIER_SPEED_VALUES = ["auto", "quiet", "low", "medium", "high", "turbo"]
+
+HUMIDIFIER_SELECT_DOMAINS = {"select", "input_select"}
+HUMIDIFIER_NUMBER_DOMAINS = {"number", "input_number"}
+HUMIDIFIER_SPEED_DOMAINS  = HUMIDIFIER_SELECT_DOMAINS | HUMIDIFIER_NUMBER_DOMAINS
+
+# Синонимы режимов humidifier → каноническая скорость Сбера.
+# Нужны, когда скорость берётся из атрибута mode самой сущности humidifier,
+# а её названия отличаются от стандартных (boost, sleep, silent и т.п.).
+HUMIDIFIER_MODE_ALIASES: dict[str, tuple[str, ...]] = {
+    "auto":   ("auto",),
+    "quiet":  ("quiet", "silent", "sleep"),
+    "low":    ("low", "min", "minimum"),
+    "medium": ("medium", "mid", "normal", "standard"),
+    "high":   ("high", "max", "maximum"),
+    "turbo":  ("turbo", "boost"),
+}

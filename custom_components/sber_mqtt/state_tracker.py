@@ -172,12 +172,8 @@ class StateTracker:
                     watched.add(battery_entity)
 
             elif device_type == DEVICE_TYPE_HUMIDIFIER:
-                entity_id = attrs.get("entity_id", "")
-                if entity_id:
-                    watched.add(entity_id)
-                for key in ("water_percentage_entity", "replace_filter_entity"):
-                    if attrs.get(key):
-                        watched.add(attrs[key])
+                from .humidifier import watched_entities
+                watched.update(watched_entities(attrs))
 
             elif device_type == DEVICE_TYPE_SOCKET:
                 entity_id = attrs.get("entity_id", "")
@@ -339,11 +335,8 @@ class StateTracker:
             }
 
         elif device_type == DEVICE_TYPE_HUMIDIFIER:
-            watched = {
-                attrs.get("entity_id", ""),
-                attrs.get("water_percentage_entity", ""),
-                attrs.get("replace_filter_entity", ""),
-            }
+            from .humidifier import watched_entities
+            watched = watched_entities(attrs)
 
         elif device_type == DEVICE_TYPE_SOCKET:
             watched = {

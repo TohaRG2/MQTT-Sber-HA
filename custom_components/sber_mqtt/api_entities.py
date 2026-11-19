@@ -288,7 +288,12 @@ class SberHAEntitiesWaterHeaterView(HomeAssistantView):
 # ── GET /api/sber_mqtt/ha_entities/humidifier ─────────────────────────────
 
 class SberHAEntitiesHumidifierView(HomeAssistantView):
-    """Список humidifier-сущностей HA для увлажнителя воздуха."""
+    """Список humidifier-сущностей HA для увлажнителя воздуха.
+
+    Дополнительно возвращает ``controls`` — select/input_select и
+    number/input_number, из которых пользователь может выбрать сущность
+    скорости вентилятора. У select есть ``options``, у number — min/max/step.
+    """
 
     url  = "/api/sber_mqtt/ha_entities/humidifier"
     name = "api:sber_mqtt:ha_entities_humidifier"
@@ -299,10 +304,32 @@ class SberHAEntitiesHumidifierView(HomeAssistantView):
 
     async def get(self, request: web.Request) -> web.Response:
         hass: HomeAssistant = request.app["hass"]
+
+        def _options(s, e):
+            if not s:
+                return []
+            opts = s.attributes.get("options")
+            return list(opts) if isinstance(opts, (list, tuple)) else []
+
+        def _num_attr(name):
+            def _get(s, e):
+                return s.attributes.get(name) if s else None
+            return _get
+
         entities = get_ha_entities(hass, "humidifier", extra_fields={
             "available_modes": lambda s, e: (s.attributes.get("available_modes") or []) if s else [],
         })
-        return web.json_response({"entities": entities})
+        controls = get_ha_entities(
+            hass, ["select", "input_select", "number", "input_number"],
+            extra_fields={
+                "options": _options,
+                "min":  _num_attr("min"),
+                "max":  _num_attr("max"),
+                "step": _num_attr("step"),
+                "state": lambda s, e: s.state if s else "",
+            },
+        )
+        return web.json_response({"entities": entities, "controls": controls})
 
 
 # ── GET /api/sber_mqtt/ha_entities/socket ────────────────────────────────────

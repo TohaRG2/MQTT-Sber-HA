@@ -480,14 +480,15 @@ def build_current_state_payload(
 
     # ── Увлажнитель воздуха ──────────────────────────────────────────────
     if device_type == "humidifier":
+        from . import humidifier as hum
+
         entity_id = attrs.get("entity_id", "")
         state = hass.states.get(entity_id)
         if not state:
             return None
 
         is_on = state.state not in ("off", "unavailable", "unknown")
-        ha_mode = state.attributes.get("mode")
-        air_flow_power = HA_MODE_TO_SBER_AIR_FLOW.get(ha_mode) if ha_mode else None
+        air_flow_power = hum.speed_state(hass, attrs)
 
         replace_filter: bool | None = None
         rfe = attrs.get("replace_filter_entity")
