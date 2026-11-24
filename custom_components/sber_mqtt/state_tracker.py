@@ -417,6 +417,20 @@ class StateTracker:
                 if s.get("key") == "on_off" and s.get("value", {}).get("bool_value") == is_on:
                     return  # состояние не изменилось
 
+        # ── Датчик движения — pir событийный: пока движение продолжается,
+        #    повторно сигнал не отправляем (обновление батареи и т.п.
+        #    не должно выглядеть как новое срабатывание) ────────────────
+        if device_type == DEVICE_TYPE_SENSOR_PIR:
+            entity_id = attrs.get("entity_id", "")
+            ps = self._hass.states.get(entity_id)
+            motion = bool(ps and ps.state == "on")
+            last_keys = {
+                s.get("key")
+                for s in (device.get("last_state") or {}).get("states", [])
+            }
+            if motion and "pir" in last_keys:
+                return
+
         # ── DevTools: логируем изменение состояния HA ─────────────────────
         try:
             from .api_devtools import devtools_track_ha_state_change

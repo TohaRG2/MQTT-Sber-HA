@@ -650,9 +650,13 @@ class SberSerializer:
         return entry
 
     def _sensor_pir_config(self, device_id: str, device: dict) -> dict:
-        """Конфиг для датчика движения (sensor_pir)."""
+        """Конфиг для датчика движения (sensor_pir).
+
+        Обязательные функции: online, pir (ENUM, значение "pir" при
+        обнаружении движения). Опционально: battery_percentage.
+        """
         attrs    = device.get("attributes", {})
-        features = ["online", "pir_state"]
+        features = ["online", "pir"]
         if attrs.get("battery_entity"):
             features.append("battery_percentage")
 
@@ -1482,11 +1486,25 @@ class SberSerializer:
         motion: bool,
         battery: float | None = None,
     ) -> str:
-        """Состояние датчика движения."""
+        """Состояние датчика движения.
+
+        Функция pir по спецификации Сбера — ENUM с единственным
+        документированным значением "pir" и является событийной: значение
+        отправляется только в момент обнаружения движения. В покое ключ
+        pir не передаётся — иначе Сбер получил бы недокументированное
+        значение (раньше сюда уходил BOOL).
+
+        motion  — True если датчик зафиксировал движение (HA state == 'on')
+        battery — заряд батареи 0–100 (опционально)
+        """
         states: list[dict] = [
             {"key": "online", "value": {"type": "BOOL", "bool_value": True}},
-            {"key": "pir_state", "value": {"type": "BOOL", "bool_value": motion}},
         ]
+        if motion:
+            states.append({
+                "key": "pir",
+                "value": {"type": "ENUM", "enum_value": "pir"},
+            })
         if battery is not None:
             try:
                 states.append({
