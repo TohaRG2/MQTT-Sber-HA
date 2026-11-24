@@ -471,6 +471,15 @@ input:focus, select:focus {
   transition: background .1s;
 }
 
+/* Пикеры без шапки: имя занимает всё свободное место */
+.p-item.p-2col { grid-template-columns: minmax(0, 1fr) 210px; }
+.p-item.p-3col { grid-template-columns: 90px minmax(0, 1fr) 210px; }
+
+@media (max-width: 500px) {
+  .p-item.p-2col { grid-template-columns: 1fr; }
+  .p-item.p-3col { grid-template-columns: 1fr; }
+}
+
 .p-item:last-child         { border-bottom: none; }
 .p-item:hover, .p-item.sel { background: var(--primary-lt); }
 .p-item.used               { background: color-mix(in srgb, var(--bg) 80%, #f57f17 20%); }

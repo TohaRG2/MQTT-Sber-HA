@@ -1946,8 +1946,8 @@ function openKettleWaterLow(){
   if(!el){wrap.style.display='none';return;}
   wrap.style.display=wrap.style.display==='none'?'':'none';
   el.innerHTML=list.length
-    ?list.map(s=>`<div class="p-item ${wData.water_low_entity===s.entity_id?'sel':''}" onclick="pickKettleWaterLow('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
-      <span class="dom-badge">${esc(s.device_class||'—')}</span><span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid">${esc(s.entity_id)}</span></div>`).join('')
+    ?list.map(s=>`<div class="p-item p-3col ${wData.water_low_entity===s.entity_id?'sel':''}" onclick="pickKettleWaterLow('${esc(s.entity_id)}','${esc(s.friendly_name)}')">
+      <span class="dom-badge">${esc(s.device_class||'—')}</span><span class="p-name">${esc(s.friendly_name)}</span><span class="p-eid" title="${esc(s.entity_id)}">${esc(s.entity_id)}</span></div>`).join('')
     :'<div class="p-empty">Нет binary_sensor</div>';
 }
 function pickKettleWaterLow(eid,name){
@@ -1977,8 +1977,8 @@ function renderStep2SensorDoor(){
 function doorItems(){
   const q=(sFilter||'').toLowerCase();
   const list=haDoor.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickDoorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+  return list.map(e=>`<div class="p-item p-2col ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickDoorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid" title="${esc(e.entity_id)}">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickDoorEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -2038,8 +2038,8 @@ function renderStep2Radiator(){
 function radiatorItems(){
   const q=(sFilter||'').toLowerCase();
   const list=haRadiator.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickRadiatorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+  return list.map(e=>`<div class="p-item p-2col ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickRadiatorEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid" title="${esc(e.entity_id)}">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickRadiatorEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -2066,8 +2066,8 @@ function renderStep2Fan(){
 function fanItems(){
   const q=(sFilter||'').toLowerCase();
   const list=haFan.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickFanEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
-    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+  return list.map(e=>`<div class="p-item p-3col ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickFanEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid" title="${esc(e.entity_id)}">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickFanEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -2108,8 +2108,8 @@ function renderStep2Intercom(){
 function intercomItems(){
   const q=(sFilter||'').toLowerCase();
   const list=haIntercom.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickIntercomEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
-    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+  return list.map(e=>`<div class="p-item p-3col ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickIntercomEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="dom-badge">${esc(e.domain)}</span><span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid" title="${esc(e.entity_id)}">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickIntercomEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -2137,8 +2137,8 @@ function pirItems(){
   const q=(sFilter||'').toLowerCase();
   const list=haPir.filter(e=>(e.friendly_name||'').toLowerCase().includes(q)||e.entity_id.includes(q));
   if(!list.length)return'<div class="p-empty">Датчики не найдены</div>';
-  return list.map(e=>`<div class="p-item ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickPirEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
-    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid">${esc(e.entity_id)}</span></div>`).join('');
+  return list.map(e=>`<div class="p-item p-2col ${wData.entity_id===e.entity_id?'sel':''}" onclick="pickPirEntity('${esc(e.entity_id)}','${esc(e.friendly_name)}','${esc(e.area||'')}')">
+    <span class="p-name">${esc(e.friendly_name)}</span><span class="p-eid" title="${esc(e.entity_id)}">${esc(e.entity_id)}</span></div>`).join('');
 }
 function pickPirEntity(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
@@ -2247,7 +2247,7 @@ function renderStep2EventButton(){
 function eventBtnItems(){
   var q=(sFilter||'').toLowerCase();
   var list=haEventBtns.filter(function(e){return(e.friendly_name||'').toLowerCase().indexOf(q)>=0||e.entity_id.indexOf(q)>=0;});
-  return list.map(function(e){return'<div class="p-item '+(wData.entity_id===e.entity_id?'sel':'')+'" onclick="pickEventBtn(\''+esc(e.entity_id)+'\',\''+esc(e.friendly_name)+'\',\''+esc(e.area||'')+'\')"><span class="dom-badge">'+esc(e.domain)+'</span><span class="p-name">'+esc(e.friendly_name)+'</span><span class="p-eid">'+esc(e.entity_id)+'</span></div>';}).join('');
+  return list.map(function(e){return'<div class="p-item p-3col '+(wData.entity_id===e.entity_id?'sel':'')+'" onclick="pickEventBtn(\''+esc(e.entity_id)+'\',\''+esc(e.friendly_name)+'\',\''+esc(e.area||'')+'\')"><span class="dom-badge">'+esc(e.domain)+'</span><span class="p-name">'+esc(e.friendly_name)+'</span><span class="p-eid" title="'+esc(e.entity_id)+'">'+esc(e.entity_id)+'</span></div>';}).join('');
 }
 function pickEventBtn(eid,name,area){
   wData.entity_id=eid;wData.entity_name=name;wData.entity_area=area;
